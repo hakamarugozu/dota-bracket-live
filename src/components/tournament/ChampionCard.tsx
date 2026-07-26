@@ -1,4 +1,4 @@
-import { TournamentBracket } from "../../../lib/bracket";
+import { TournamentBracket } from "@/lib/bracket";
 import TeamAvatar from "./TeamAvatar";
 
 type ChampionCardProps = {

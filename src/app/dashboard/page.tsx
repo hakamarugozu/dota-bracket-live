@@ -26,7 +26,7 @@ const dashboardActions: DashboardAction[] = [
     title: "Administrar torneos",
     description:
       "Consulta tus competencias, resultados y enfrentamientos.",
-    href: "/tournament",
+   href: "/tournaments",
     icon: "◆",
   },
 ];

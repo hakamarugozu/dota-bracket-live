@@ -11,8 +11,10 @@ type FormData = {
   organization: string;
   customOrganization: string;
   game: string;
+  customGame: string;
   tournamentType: string;
   format: string;
+  mode: "team" | "individual";
   teams: number;
   date: string;
   time: string;
@@ -28,8 +30,10 @@ const initialFormData: FormData = {
   organization: "W3Arena",
   customOrganization: "",
   game: "Dota 1",
+  customGame: "",
   tournamentType: "Comunitario",
   format: "Eliminación simple",
+  mode: "team",
   teams: 8,
   date: "",
   time: "",
@@ -76,6 +80,69 @@ const statuses = [
   "En curso",
 ];
 
+const games = [
+  {
+    value: "Dota 1",
+    title: "Dota 1",
+    description: "Warcraft III: The Frozen Throne",
+  },
+  {
+    value: "Dota 2",
+    title: "Dota 2",
+    description: "Valve — Steam",
+  },
+  {
+    value: "League of Legends",
+    title: "League of Legends",
+    description: "Riot Games",
+  },
+  {
+    value: "Heroes of the Storm",
+    title: "Heroes of the Storm",
+    description: "Blizzard Entertainment",
+  },
+  {
+    value: "Mobile Legends",
+    title: "Mobile Legends",
+    description: "Bang Bang",
+  },
+  {
+    value: "Valorant",
+    title: "Valorant",
+    description: "Riot Games",
+  },
+  {
+    value: "Counter-Strike 2",
+    title: "Counter-Strike 2",
+    description: "Valve — Steam",
+  },
+  {
+    value: "Warcraft III",
+    title: "Warcraft III",
+    description: "Blizzard Entertainment",
+  },
+  {
+    value: "StarCraft II",
+    title: "StarCraft II",
+    description: "Blizzard Entertainment",
+  },
+  {
+    value: "Rocket League",
+    title: "Rocket League",
+    description: "Epic Games",
+  },
+  {
+    value: "EA Sports FC",
+    title: "EA Sports FC",
+    description: "Electronic Arts",
+  },
+  {
+    value: "Otro",
+    title: "Otro juego",
+    description: "Escribe el nombre manualmente",
+  },
+] as const;
+
 function createSlug(value: string) {
   const normalized = value
     .normalize("NFD")
@@ -107,6 +174,20 @@ export default function CreateTournamentPage() {
 
     return formData.organization;
   }, [formData.organization, formData.customOrganization]);
+
+  const selectedGameName = useMemo(() => {
+    if (formData.game === "Otro") {
+      return (formData.customGame ?? "").trim();
+    }
+
+    return formData.game;
+  }, [formData.game, formData.customGame]);
+
+  const selectedGameDescription = useMemo(() => {
+    return (
+      games.find((game) => game.value === formData.game)?.description ?? ""
+    );
+  }, [formData.game]);
 
   const previewSlug = useMemo(() => {
     return formData.name
@@ -151,6 +232,13 @@ export default function CreateTournamentPage() {
       return "Selecciona el juego.";
     }
 
+    if (
+      formData.game === "Otro" &&
+      !(formData.customGame ?? "").trim()
+    ) {
+      return "Escribe el nombre del juego.";
+    }
+
     if (!formData.tournamentType) {
       return "Selecciona el tipo de torneo.";
     }
@@ -160,7 +248,7 @@ export default function CreateTournamentPage() {
     }
 
     if (![8, 16, 32, 64].includes(formData.teams)) {
-      return "Selecciona una cantidad válida de equipos.";
+      return `Selecciona una cantidad válida de ${formData.mode === "individual" ? "jugadores" : "equipos"}.`;
     }
 
     if (!formData.date) {
@@ -213,74 +301,73 @@ export default function CreateTournamentPage() {
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      setLoading(false);
-      setErrorMessage(
-        "Tu sesión no está disponible. Inicia sesión nuevamente.",
-      );
+ if (userError || !user) {
+  setLoading(false);
 
-      setTimeout(() => {
-        router.replace("/login");
-      }, 1200);
+  setErrorMessage(
+    "Tu sesión no está disponible. Inicia sesión nuevamente.",
+  );
 
-      return;
-    }
+  setTimeout(() => {
+    router.replace("/login");
+  }, 1200);
 
+  return;
+}
     const slug = createSlug(formData.name);
 
-    const { error: insertError } = await supabase
-      .from("tournaments")
-      .insert({
-        user_id: user.id,
-        name: formData.name.trim(),
-        organization: organizationName,
-        game: formData.game,
-        tournament_type: formData.tournamentType,
-        format: formData.format,
-        teams: formData.teams,
-        max_players: formData.teams,
-        date: formData.date,
-        time: formData.time,
-        server: formData.server,
-        stream: formData.stream.trim() || null,
-        description: formData.description.trim() || null,
-        rules: formData.rules.trim() || null,
-        slug,
-        status: formData.status,
-        banner: null,
-      });
+const { data: createdTournament, error: insertError } = await supabase
+  .from("tournaments")
+  .insert({
+    user_id: user.id,
+    name: formData.name.trim(),
+    organization: organizationName,
+    game: selectedGameName,
+    tournament_type: formData.tournamentType,
+    format: formData.format,
+    mode: formData.mode,
+    teams: formData.teams,
+    max_players: formData.teams,
+    date: formData.date,
+    time: formData.time,
+    server: formData.server,
+    stream: formData.stream.trim() || null,
+    description: formData.description.trim() || null,
+    rules: formData.rules.trim() || null,
+    slug,
+    status: formData.status,
+    banner: null,
+  })
+  .select()
+  .single();
 
-    setLoading(false);
+if (insertError || !createdTournament) {
+  setLoading(false);
 
-    if (insertError) {
-      console.error("Error al crear el torneo:", insertError);
+  console.error(
+    "Error al crear el torneo:",
+    insertError || "Supabase no devolvió el torneo creado",
+  );
 
-      setErrorMessage(
-        `No se pudo crear el torneo: ${insertError.message}`,
-      );
+  setErrorMessage(
+    insertError
+      ? `No se pudo crear el torneo: ${insertError.message}`
+      : "El torneo se guardó, pero no se pudo obtener su identificador.",
+  );
 
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
-      });
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  });
 
-      return;
-    }
+  return;
+}
 
-    setSuccessMessage("El torneo fue creado correctamente.");
+setLoading(false);
+router.replace(`/tournaments/${createdTournament.id}/teams`);
+}
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-
-    setTimeout(() => {
-      router.push("/dashboard");
-      router.refresh();
-    }, 1200);
-  }
-
-  return (
+return (
     <main className="min-h-screen bg-[#070707] text-white">
       <header className="border-b border-white/10 bg-[#0b0b0d]">
         <div className="mx-auto flex min-h-[76px] w-full max-w-[1500px] items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -290,17 +377,17 @@ export default function CreateTournamentPage() {
           >
             <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-red-500/40 bg-red-600/10 shadow-[0_0_25px_rgba(220,38,38,0.15)]">
               <span className="text-xl font-black text-red-500">
-                D
+                E
               </span>
             </div>
 
-            <div>
-              <p className="text-sm font-black uppercase tracking-[0.16em] text-white">
-                Dota Bracket
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
+                Esports
               </p>
 
-              <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.28em] text-red-500">
-                Live
+              <p className="mt-0.5 truncate text-xs font-semibold uppercase tracking-[0.2em] text-red-500">
+                Bracket Live
               </p>
             </div>
           </Link>
@@ -334,7 +421,7 @@ export default function CreateTournamentPage() {
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-400 sm:text-base">
               Configura los datos principales de la competencia. Después
-              podrás registrar equipos, generar el fixture y administrar
+              podrás registrar participantes, generar el fixture y administrar
               los resultados.
             </p>
           </div>
@@ -548,55 +635,121 @@ export default function CreateTournamentPage() {
                   Juego y formato
                 </h2>
 
-                <p className="mt-2 text-sm text-neutral-500">
-                  Selecciona el juego, la eliminación y la cantidad de
-                  participantes.
-                </p>
+<p className="mt-2 text-sm text-neutral-500">
+  Selecciona el juego, el formato y la capacidad máxima del torneo.
+  Podrás generar el fixture aunque no se complete el cupo.
+</p>
+              </div>
+
+              <div className="mt-6">
+                <label
+                  htmlFor="game"
+                  className="mb-3 block text-sm font-semibold text-neutral-300"
+                >
+                  Juego
+                  <span className="ml-1 text-red-500">*</span>
+                </label>
+
+                <div className="relative">
+                  <select
+                    id="game"
+                    value={formData.game}
+                    onChange={(event) =>
+                      updateField("game", event.target.value)
+                    }
+                    disabled={loading}
+                    className="w-full appearance-none rounded-xl border border-white/10 bg-[#0a0a0c] px-4 py-3.5 pr-12 text-sm font-semibold text-white outline-none transition focus:border-red-500/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {games.map((game) => (
+                      <option key={game.value} value={game.value}>
+                        {game.title}
+                      </option>
+                    ))}
+                  </select>
+
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-lg text-neutral-500"
+                  >
+                    ▾
+                  </span>
+                </div>
+
+                {selectedGameDescription && formData.game !== "Otro" && (
+                  <p className="mt-2 text-xs text-neutral-600">
+                    {selectedGameDescription}
+                  </p>
+                )}
+
+                {formData.game === "Otro" && (
+                  <div className="mt-4">
+                    <label
+                      htmlFor="customGame"
+                      className="mb-2 block text-sm font-semibold text-neutral-300"
+                    >
+                      Nombre del juego
+                      <span className="ml-1 text-red-500">*</span>
+                    </label>
+
+                    <input
+                      id="customGame"
+                      type="text"
+                      value={formData.customGame ?? ""}
+                      onChange={(event) =>
+                        updateField("customGame", event.target.value)
+                      }
+                      disabled={loading}
+                      maxLength={80}
+                      placeholder="Ejemplo: Tekken 8"
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-neutral-700 focus:border-red-500/60 focus:bg-black/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="mt-6">
                 <p className="mb-3 text-sm font-semibold text-neutral-300">
-                  Juego
+                  Modalidad
                   <span className="ml-1 text-red-500">*</span>
                 </p>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {["Dota 1", "Dota 2"].map((game) => {
-                    const selected = formData.game === game;
+                  {[
+                    {
+                      value: "team" as const,
+                      title: "Por equipos",
+                      description: "Registra equipos con logo, país y capitán.",
+                    },
+                    {
+                      value: "individual" as const,
+                      title: "Individual (1 vs 1)",
+                      description: "Registra jugadores con avatar y país.",
+                    },
+                  ].map((mode) => {
+                    const selected = formData.mode === mode.value;
 
                     return (
                       <button
-                        key={game}
+                        key={mode.value}
                         type="button"
-                        onClick={() => updateField("game", game)}
+                        onClick={() => updateField("mode", mode.value)}
                         disabled={loading}
                         className={`rounded-2xl border p-5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           selected
-                            ? "border-red-500/50 bg-red-600/10 shadow-[inset_3px_0_0_0_rgba(239,68,68,1)]"
+                            ? "border-red-500/50 bg-red-600/10"
                             : "border-white/10 bg-black/20 hover:border-white/20 hover:bg-white/[0.03]"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-start justify-between gap-4">
                           <div>
-                            <p
-                              className={`text-lg font-black ${
-                                selected
-                                  ? "text-white"
-                                  : "text-neutral-300"
-                              }`}
-                            >
-                              {game}
-                            </p>
-
-                            <p className="mt-1 text-xs text-neutral-600">
-                              {game === "Dota 1"
-                                ? "Warcraft III: The Frozen Throne"
-                                : "Valve — Steam"}
+                            <p className="font-bold text-white">{mode.title}</p>
+                            <p className="mt-2 text-xs leading-5 text-neutral-600">
+                              {mode.description}
                             </p>
                           </div>
 
                           <span
-                            className={`flex h-6 w-6 items-center justify-center rounded-full border ${
+                            className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
                               selected
                                 ? "border-red-500 bg-red-600 text-white"
                                 : "border-neutral-700 text-transparent"
@@ -676,11 +829,11 @@ export default function CreateTournamentPage() {
                 </div>
               </div>
 
-              <div className="mt-6">
-                <p className="mb-3 text-sm font-semibold text-neutral-300">
-                  Cantidad de equipos
-                  <span className="ml-1 text-red-500">*</span>
-                </p>
+<div className="mt-6">
+  <p className="mb-3 text-sm font-semibold text-neutral-300">
+    Capacidad máxima
+    <span className="ml-1 text-red-500">*</span>
+  </p>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {[8, 16, 32, 64].map((amount) => {
@@ -709,11 +862,35 @@ export default function CreateTournamentPage() {
                               : "text-neutral-600"
                           }`}
                         >
-                          Equipos
+                        Capacidad máxima
                         </span>
                       </button>
                     );
                   })}
+                </div>
+
+                <div className="mt-5 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="text-xl">ℹ️</div>
+
+                    <div>
+                      <p className="text-sm font-semibold text-blue-300">
+                        Capacidad máxima del torneo
+                      </p>
+
+                      <p className="mt-1 text-sm leading-6 text-blue-200">
+                        La capacidad máxima indica el número máximo de{" "}
+                        {formData.mode === "individual"
+                          ? "jugadores"
+                          : "equipos"} que podrán registrarse.
+                      </p>
+
+                      <p className="mt-2 text-sm text-blue-300">
+                        Podrás generar el fixture aunque no se complete la
+                        capacidad máxima.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -922,7 +1099,7 @@ export default function CreateTournamentPage() {
                 <div className="space-y-4 p-5">
                   <PreviewItem
                     label="Juego"
-                    value={formData.game}
+                    value={selectedGameName || "Por definir"}
                   />
 
                   <PreviewItem
@@ -931,8 +1108,13 @@ export default function CreateTournamentPage() {
                   />
 
                   <PreviewItem
-                    label="Participantes"
-                    value={`${formData.teams} equipos`}
+                    label="Modalidad"
+                    value={formData.mode === "individual" ? "Individual (1 vs 1)" : "Por equipos"}
+                  />
+
+                  <PreviewItem
+                    label="Capacidad máxima"
+                    value={`${formData.teams} ${formData.mode === "individual" ? "jugadores" : "equipos"}`}
                   />
 
                   <PreviewItem
@@ -964,8 +1146,8 @@ export default function CreateTournamentPage() {
               </p>
 
               <p className="mt-2 text-xs leading-6 text-amber-500/60">
-                Después de crear el torneo podrás registrar los equipos,
-                agregar sus logos y generar el fixture.
+                Después de crear el torneo podrás registrar los participantes,
+                agregar sus imágenes y generar el fixture.
               </p>
             </section>
 

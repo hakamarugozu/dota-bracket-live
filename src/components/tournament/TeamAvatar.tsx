@@ -1,6 +1,6 @@
 import {
   BracketTeam,
-} from "../../../lib/bracket";
+} from "@/lib/bracket";
 
 import {
   getTeamIdentity,

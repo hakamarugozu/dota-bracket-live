@@ -1,5 +1,5 @@
 import DialogTeam from "@/components/tournament/DialogTeam";
-import { BracketMatch, BracketTeam } from "../../../lib/bracket";
+import { BracketMatch, BracketTeam } from "@/lib/bracket";
 
 const QUICK_RESULTS = [
   [1,0],[2,0],[2,1],[3,0],[3,1],[3,2],

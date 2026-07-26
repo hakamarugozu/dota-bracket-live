@@ -1,4 +1,4 @@
-import { Tournament } from "../../../lib/bracket";
+import { Tournament } from "@/lib/bracket";
 import TeamAvatar from "./TeamAvatar";
 
 export default function TeamsTab({

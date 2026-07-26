@@ -9,19 +9,41 @@ import {
 
 import ChampionCard from "@/components/tournament/ChampionCard";
 import TeamAvatar from "@/components/tournament/TeamAvatar";
-import {
+
+import type {
   BracketMatch,
   BracketTeam,
   TournamentBracket,
-} from "../../../lib/bracket";
+} from "@/lib/bracket";
+
+import type {
+  DoubleBracketMatch,
+  DoubleBracketRound,
+  DoubleTournamentBracket,
+} from "@/lib/double-bracket";
 
 const MATCH_WIDTH = 246;
 const MATCH_HEIGHT = 138;
+
 const ROUND_GAP = 82;
 const SLOT_HEIGHT = 168;
+
 const CHAMPION_WIDTH = 210;
-const PAD_X = 28;
+
+const PAD_X = 8;
 const PAD_Y = 22;
+
+const HEADER_HEIGHT = 88;
+const SECTION_HEADER_HEIGHT = 58;
+const SECTION_GAP = 24;
+
+type ActiveBracket =
+  | TournamentBracket
+  | DoubleTournamentBracket;
+
+type ActiveMatch =
+  | BracketMatch
+  | DoubleBracketMatch;
 
 type MatchPosition = {
   x: number;
@@ -29,18 +51,110 @@ type MatchPosition = {
   centerY: number;
 };
 
-type PositionMap = Record<string, MatchPosition>;
+type PositionMap = Record<
+  string,
+  MatchPosition
+>;
+
+type SectionLabel = {
+  id: string;
+  text: string;
+  top: number;
+};
+
+type RoundHeader = {
+  id: string;
+  name: string;
+  subtitle: string;
+  x: number;
+  top: number;
+  width: number;
+  variant:
+    | "winner"
+    | "loser"
+    | "final";
+};
+
+type ConnectionPath = {
+  id: string;
+  path: string;
+  completed: boolean;
+  variant:
+    | "winner"
+    | "loser"
+    | "drop"
+    | "final"
+    | "champion";
+};
+
+type BracketLayout = {
+  positions: PositionMap;
+  headers: RoundHeader[];
+  sectionLabels: SectionLabel[];
+
+  visibleMatches: ActiveMatch[];
+
+  championX: number;
+  championY: number;
+
+  width: number;
+  height: number;
+};
+
+type Props = {
+  bracket: ActiveBracket;
+
+  onSelectWinner: (
+    match: ActiveMatch,
+    winnerId: string
+  ) => void;
+
+  onResetWinner: (
+    matchId: string
+  ) => void;
+
+  liveMatchId?: string | null;
+
+  canManageLiveMatch?: boolean;
+
+  updatingLiveMatch?: boolean;
+
+  onToggleLiveMatch?: (
+    match: ActiveMatch
+  ) => void;
+};
+
+function isDoubleBracket(
+  bracket: ActiveBracket
+): bracket is DoubleTournamentBracket {
+  return (
+    "winnerRounds" in bracket &&
+    "loserRounds" in bracket
+  );
+}
+
+function isDoubleMatch(
+  match: ActiveMatch
+): match is DoubleBracketMatch {
+  return (
+    "section" in match &&
+    "automaticAdvance" in match
+  );
+}
 
 export default function BracketCanvas({
   bracket,
   onSelectWinner,
   onResetWinner,
-}: {
-  bracket: TournamentBracket;
-  onSelectWinner: (match: BracketMatch, winnerId: string) => void;
-  onResetWinner: (matchId: string) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  liveMatchId = null,
+  canManageLiveMatch = false,
+  updatingLiveMatch = false,
+  onToggleLiveMatch = () => undefined,
+}: Props) {
+  const scrollRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
 
   const dragState = useRef({
     active: false,
@@ -48,26 +162,46 @@ export default function BracketCanvas({
     startScroll: 0,
   });
 
-  const [dragging, setDragging] = useState(false);
+  const [dragging, setDragging] =
+    useState(false);
 
-  const layout = useMemo(() => createBracketLayout(bracket), [bracket]);
+  const layout = useMemo(
+    () =>
+      isDoubleBracket(bracket)
+        ? createDoubleBracketLayout(
+            bracket
+          )
+        : createSingleBracketLayout(
+            bracket
+          ),
+    [bracket]
+  );
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) {
+  const handlePointerDown = (
+    event:
+      ReactPointerEvent<HTMLDivElement>
+  ) => {
+    if (
+      event.pointerType === "mouse" &&
+      event.button !== 0
+    ) {
       return;
     }
 
-    const target = event.target as HTMLElement;
+    const target =
+      event.target as HTMLElement;
 
-    const interactiveElement = target.closest(
-      "button,input,select,a,textarea,label",
-    );
+    const interactiveElement =
+      target.closest(
+        "button,input,select,a,textarea,label"
+      );
 
     if (interactiveElement) {
       return;
     }
 
-    const container = scrollRef.current;
+    const container =
+      scrollRef.current;
 
     if (!container) {
       return;
@@ -76,50 +210,85 @@ export default function BracketCanvas({
     dragState.current = {
       active: true,
       startX: event.clientX,
-      startScroll: container.scrollLeft,
+      startScroll:
+        container.scrollLeft,
     };
 
     setDragging(true);
 
-    container.setPointerCapture(event.pointerId);
+    container.setPointerCapture(
+      event.pointerId
+    );
 
     event.preventDefault();
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const container = scrollRef.current;
+  const handlePointerMove = (
+    event:
+      ReactPointerEvent<HTMLDivElement>
+  ) => {
+    const container =
+      scrollRef.current;
 
-    if (!container || !dragState.current.active) {
+    if (
+      !container ||
+      !dragState.current.active
+    ) {
       return;
     }
 
-    const distance = event.clientX - dragState.current.startX;
+    const distance =
+      event.clientX -
+      dragState.current.startX;
 
-    container.scrollLeft = dragState.current.startScroll - distance;
+    container.scrollLeft =
+      dragState.current.startScroll -
+      distance;
 
     event.preventDefault();
   };
 
-  const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const container = scrollRef.current;
+  const handlePointerEnd = (
+    event:
+      ReactPointerEvent<HTMLDivElement>
+  ) => {
+    const container =
+      scrollRef.current;
 
     dragState.current.active = false;
+
     setDragging(false);
 
-    if (container?.hasPointerCapture(event.pointerId)) {
-      container.releasePointerCapture(event.pointerId);
+    if (
+      container?.hasPointerCapture(
+        event.pointerId
+      )
+    ) {
+      container.releasePointerCapture(
+        event.pointerId
+      );
     }
   };
 
   return (
     <div
       ref={scrollRef}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
+      onPointerDown={
+        handlePointerDown
+      }
+      onPointerMove={
+        handlePointerMove
+      }
+      onPointerUp={
+        handlePointerEnd
+      }
+      onPointerCancel={
+        handlePointerEnd
+      }
       className={`relative overflow-auto select-none bg-[radial-gradient(circle_at_top,rgba(127,29,29,0.10),transparent_32%),linear-gradient(rgba(255,255,255,0.018)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:auto,28px_28px,28px_28px] ${
-        dragging ? "cursor-grabbing" : "cursor-grab"
+        dragging
+          ? "cursor-grabbing"
+          : "cursor-grab"
       }`}
     >
       <div
@@ -130,18 +299,39 @@ export default function BracketCanvas({
           height: layout.height,
         }}
       >
-        <RoundHeaders bracket={bracket} championX={layout.championX} />
+        <SectionLabels
+          labels={
+            layout.sectionLabels
+          }
+        />
+
+        <RoundHeaders
+          headers={layout.headers}
+        />
 
         <BracketConnections
           bracket={bracket}
-          positions={layout.positions}
-          championX={layout.championX}
+          positions={
+            layout.positions
+          }
+          championX={
+            layout.championX
+          }
+          championY={
+            layout.championY
+          }
         />
 
-        {bracket.rounds
-          .flatMap((round) => round.matches)
-          .map((match) => {
-            const position = layout.positions[match.id];
+        {layout.visibleMatches.map(
+          (match) => {
+            const position =
+              layout.positions[
+                match.id
+              ];
+
+            if (!position) {
+              return null;
+            }
 
             return (
               <div
@@ -156,89 +346,234 @@ export default function BracketCanvas({
               >
                 <MatchCard
                   match={match}
-                  onSelectWinner={onSelectWinner}
-                  onResetWinner={onResetWinner}
+                  onSelectWinner={
+                    onSelectWinner
+                  }
+                  onResetWinner={
+                    onResetWinner
+                  }
+                  liveMatchId={
+                    liveMatchId
+                  }
+                  canManageLiveMatch={
+                    canManageLiveMatch
+                  }
+                  updatingLiveMatch={
+                    updatingLiveMatch
+                  }
+                  onToggleLiveMatch={
+                    onToggleLiveMatch
+                  }
                 />
               </div>
             );
-          })}
+          }
+        )}
 
         <div
           className="absolute"
           style={{
             left: layout.championX,
-            top: layout.championY - 112,
+            top:
+              layout.championY -
+              112,
             width: CHAMPION_WIDTH,
           }}
         >
-          <ChampionCard bracket={bracket} />
+          {isDoubleBracket(
+            bracket
+          ) ? (
+            <DoubleChampionCard
+              bracket={bracket}
+            />
+          ) : (
+            <ChampionCard
+              bracket={bracket}
+            />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function createBracketLayout(bracket: TournamentBracket) {
-  const positions: PositionMap = {};
+function createSingleBracketLayout(
+  bracket: TournamentBracket
+): BracketLayout {
+  const positions: PositionMap =
+    {};
 
-  const firstRoundMatches = bracket.rounds[0]?.matches.length || 1;
+  const firstRoundMatches =
+    bracket.rounds[0]?.matches
+      .length || 1;
 
-  const contentHeight = firstRoundMatches * SLOT_HEIGHT;
+  const contentHeight =
+    firstRoundMatches *
+    SLOT_HEIGHT;
 
-  const height = Math.max(650, contentHeight + PAD_Y * 2 + 76);
+  const height = Math.max(
+    650,
+    contentHeight +
+      PAD_Y * 2 +
+      HEADER_HEIGHT
+  );
 
-  bracket.rounds.forEach((round, roundIndex) => {
-    const x = PAD_X + roundIndex * (MATCH_WIDTH + ROUND_GAP);
+  const headers: RoundHeader[] =
+    [];
 
-    round.matches.forEach((match, matchIndex) => {
-      let centerY: number;
+  bracket.rounds.forEach(
+    (round, roundIndex) => {
+      const x =
+        PAD_X +
+        roundIndex *
+          (MATCH_WIDTH +
+            ROUND_GAP);
 
-      if (roundIndex === 0) {
-        centerY = 88 + PAD_Y + SLOT_HEIGHT / 2 + matchIndex * SLOT_HEIGHT;
-      } else {
-        const previousRound = bracket.rounds[roundIndex - 1];
-
-        const firstPrevious = previousRound.matches[matchIndex * 2];
-
-        const secondPrevious = previousRound.matches[matchIndex * 2 + 1];
-
-        const firstPosition = firstPrevious
-          ? positions[firstPrevious.id]
-          : null;
-
-        const secondPosition = secondPrevious
-          ? positions[secondPrevious.id]
-          : null;
-
-        centerY =
-          firstPosition && secondPosition
-            ? (firstPosition.centerY + secondPosition.centerY) / 2
-            : 88 + PAD_Y + contentHeight / 2;
-      }
-
-      positions[match.id] = {
+      headers.push({
+        id: round.id,
+        name: round.name,
+        subtitle: `RONDA ${
+          roundIndex + 1
+        }`,
         x,
-        centerY,
-        top: centerY - MATCH_HEIGHT / 2,
-      };
-    });
-  });
+        top: 0,
+        width: MATCH_WIDTH,
+        variant: "winner",
+      });
 
-  const championX = PAD_X + bracket.rounds.length * (MATCH_WIDTH + ROUND_GAP);
+      round.matches.forEach(
+        (
+          match,
+          matchIndex
+        ) => {
+          let centerY: number;
 
-  const finalRound = bracket.rounds[bracket.rounds.length - 1];
+          if (roundIndex === 0) {
+            centerY =
+              HEADER_HEIGHT +
+              PAD_Y +
+              SLOT_HEIGHT / 2 +
+              matchIndex *
+                SLOT_HEIGHT;
+          } else {
+            const previousRound =
+              bracket.rounds[
+                roundIndex - 1
+              ];
 
-  const finalMatch = finalRound?.matches[0];
+            const firstPrevious =
+              previousRound.matches[
+                matchIndex * 2
+              ];
+
+            const secondPrevious =
+              previousRound.matches[
+                matchIndex * 2 + 1
+              ];
+
+            const firstPosition =
+              firstPrevious
+                ? positions[
+                    firstPrevious.id
+                  ]
+                : null;
+
+            const secondPosition =
+              secondPrevious
+                ? positions[
+                    secondPrevious.id
+                  ]
+                : null;
+
+            centerY =
+              firstPosition &&
+              secondPosition
+                ? (firstPosition.centerY +
+                    secondPosition.centerY) /
+                  2
+                : HEADER_HEIGHT +
+                  PAD_Y +
+                  contentHeight /
+                    2;
+          }
+
+          
+          positions[match.id] = {
+            x,
+            centerY,
+            top:
+              centerY -
+              MATCH_HEIGHT / 2,
+          };
+        }
+      );
+    }
+  );
+
+  const championX =
+    PAD_X +
+    bracket.rounds.length *
+      (MATCH_WIDTH + ROUND_GAP);
+
+  const finalRound =
+    bracket.rounds[
+      bracket.rounds.length - 1
+    ];
+
+  const finalMatch =
+    finalRound?.matches[0];
 
   const championY =
-    finalMatch && positions[finalMatch.id]
-      ? positions[finalMatch.id].centerY
+    finalMatch &&
+    positions[finalMatch.id]
+      ? positions[finalMatch.id]
+          .centerY
       : height / 2;
 
-  const width = championX + CHAMPION_WIDTH + PAD_X;
+  headers.push({
+    id: "single-champion",
+    name: "CAMPEÓN",
+    subtitle: "GANADOR",
+    x: championX,
+    top: 0,
+    width: CHAMPION_WIDTH,
+    variant: "final",
+  });
+
+  const visibleMatches =
+    bracket.rounds
+      .flatMap(
+        (round) =>
+          round.matches
+      )
+      .filter((match) => {
+        if (
+          match.roundIndex > 0
+        ) {
+          return true;
+        }
+
+        const teamCount =
+          Number(
+            Boolean(match.team1)
+          ) +
+          Number(
+            Boolean(match.team2)
+          );
+
+        return teamCount === 2;
+      });
+
+  const width =
+    championX +
+    CHAMPION_WIDTH +
+    PAD_X;
 
   return {
     positions,
+    headers,
+    sectionLabels: [],
+    visibleMatches,
     championX,
     championY,
     height,
@@ -246,51 +581,655 @@ function createBracketLayout(bracket: TournamentBracket) {
   };
 }
 
-function RoundHeaders({
-  bracket,
-  championX,
+function createDoubleBracketLayout(
+  bracket: DoubleTournamentBracket
+): BracketLayout {
+  const positions: PositionMap =
+    {};
+
+  const headers: RoundHeader[] =
+    [];
+
+  const sectionLabels:
+    SectionLabel[] = [];
+
+  const visibleMatches:
+    ActiveMatch[] = [];
+
+const winnerFirstRound =
+  bracket.winnerRounds[0];
+
+const visibleWinnerFirstRoundCount =
+  winnerFirstRound
+    ? winnerFirstRound.matches.filter(
+        (match) =>
+          !(
+            match.automaticAdvance &&
+            Number(Boolean(match.team1)) +
+              Number(Boolean(match.team2)) <
+              2
+          )
+      ).length
+    : 1;
+
+const winnerContentHeight =
+  Math.max(
+    SLOT_HEIGHT,
+    visibleWinnerFirstRoundCount *
+      SLOT_HEIGHT
+  );
+
+  const winnerTop =
+    SECTION_HEADER_HEIGHT +
+    HEADER_HEIGHT;
+
+  const winnerSectionHeight =
+    winnerContentHeight +
+    PAD_Y * 2;
+
+  const loserTop =
+    winnerTop +
+    winnerSectionHeight +
+    SECTION_GAP +
+    SECTION_HEADER_HEIGHT +
+    HEADER_HEIGHT;
+
+  const loserFirstRoundCount =
+    bracket.loserRounds[0]
+      ?.matches.length || 1;
+
+  const loserContentHeight =
+    Math.max(
+      SLOT_HEIGHT,
+      loserFirstRoundCount *
+        SLOT_HEIGHT
+    );
+
+  const loserSectionHeight =
+    loserContentHeight +
+    PAD_Y * 2;
+
+  sectionLabels.push({
+    id: "winner-section",
+    text: "WINNER BRACKET",
+    top: 0,
+  });
+
+  sectionLabels.push({
+    id: "loser-section",
+    text: "LOSER BRACKET",
+    top:
+      winnerTop +
+      winnerSectionHeight +
+      SECTION_GAP,
+  });
+
+  layoutDoubleRounds({
+    rounds:
+      bracket.winnerRounds,
+    positions,
+    headers,
+    visibleMatches,
+    sectionTop: winnerTop,
+    sectionHeaderTop:
+      SECTION_HEADER_HEIGHT,
+    variant: "winner",
+  });
+
+  layoutDoubleRounds({
+    rounds:
+      bracket.loserRounds,
+    positions,
+    headers,
+    visibleMatches,
+    sectionTop: loserTop,
+    sectionHeaderTop:
+      loserTop -
+      HEADER_HEIGHT,
+    variant: "loser",
+  });
+
+  const largestRoundCount =
+    Math.max(
+      bracket.winnerRounds.length,
+      bracket.loserRounds.length
+    );
+
+const grandFinalX =
+  PAD_X +
+  largestRoundCount *
+    (MATCH_WIDTH + ROUND_GAP) -
+  80;
+
+const championX =
+  grandFinalX +
+  MATCH_WIDTH +
+  ROUND_GAP;
+
+  const finalsCenterY =
+    winnerTop +
+    winnerSectionHeight / 2;
+
+  if (bracket.grandFinal) {
+  const resetFinalIsActive =
+    Boolean(
+      bracket.resetFinal?.team1 &&
+      bracket.resetFinal?.team2
+    ) ||
+    Boolean(
+      bracket.resetFinal?.completed
+    );
+
+  const grandFinalCenterY =
+    resetFinalIsActive
+      ? finalsCenterY - 92
+      : finalsCenterY;
+
+  positions[
+    bracket.grandFinal.id
+  ] = {
+    x: grandFinalX,
+    centerY: grandFinalCenterY,
+    top:
+      grandFinalCenterY -
+      MATCH_HEIGHT / 2,
+  };
+
+  visibleMatches.push(
+    bracket.grandFinal
+  );
+
+  headers.push({
+    id: "grand-final-header",
+    name: "GRAN FINAL",
+    subtitle:
+      resetFinalIsActive
+        ? "RESET ACTIVO"
+        : "WINNER VS LOSER",
+    x: grandFinalX,
+    top: SECTION_HEADER_HEIGHT,
+    width: MATCH_WIDTH,
+    variant: "final",
+  });
+
+  if (
+    bracket.resetFinal &&
+    resetFinalIsActive
+  ) {
+    const resetFinalCenterY =
+      finalsCenterY + 92;
+
+    positions[
+      bracket.resetFinal.id
+    ] = {
+      x: grandFinalX,
+      centerY:
+        resetFinalCenterY,
+      top:
+        resetFinalCenterY -
+        MATCH_HEIGHT / 2,
+    };
+
+    visibleMatches.push(
+      bracket.resetFinal
+    );
+  }
+}
+
+const resetFinalIsActive =
+  Boolean(
+    bracket.resetFinal?.team1 &&
+    bracket.resetFinal?.team2
+  ) ||
+  Boolean(
+    bracket.resetFinal?.completed
+  );
+
+const championY =
+  resetFinalIsActive &&
+  bracket.resetFinal
+    ? positions[
+        bracket.resetFinal.id
+      ]?.centerY ??
+      finalsCenterY
+    : bracket.grandFinal
+      ? positions[
+          bracket.grandFinal.id
+        ]?.centerY ??
+        finalsCenterY
+      : finalsCenterY;
+
+  headers.push({
+    id: "double-champion",
+    name: "CAMPEÓN",
+    subtitle: "GANADOR FINAL",
+    x: championX,
+    top: SECTION_HEADER_HEIGHT,
+    width: CHAMPION_WIDTH,
+    variant: "final",
+  });
+
+  const width =
+    championX +
+    CHAMPION_WIDTH +
+    PAD_X;
+
+  const height =
+    loserTop +
+    loserSectionHeight +
+    PAD_Y +
+    50;
+
+  return {
+    positions,
+    headers,
+    sectionLabels,
+    visibleMatches,
+    championX,
+    championY,
+    width,
+    height,
+  };
+}
+
+function layoutDoubleRounds({
+  rounds,
+  positions,
+  headers,
+  visibleMatches,
+  sectionTop,
+  sectionHeaderTop,
+  variant,
 }: {
-  bracket: TournamentBracket;
-  championX: number;
+  rounds: DoubleBracketRound[];
+
+  positions: PositionMap;
+
+  headers: RoundHeader[];
+
+  visibleMatches: ActiveMatch[];
+
+  sectionTop: number;
+
+  sectionHeaderTop: number;
+
+  variant:
+    | "winner"
+    | "loser";
+}) {
+  const firstRound =
+    rounds[0];
+
+  const firstRoundVisibleMatches =
+    firstRound
+      ? firstRound.matches.filter(
+          (match) =>
+            !(
+              variant === "winner" &&
+              match.automaticAdvance &&
+              Number(Boolean(match.team1)) +
+                Number(Boolean(match.team2)) <
+                2
+            )
+        )
+      : [];
+
+  const visibleFirstRoundCount =
+    Math.max(
+      1,
+      firstRoundVisibleMatches.length
+    );
+
+  const contentHeight =
+    visibleFirstRoundCount *
+    SLOT_HEIGHT;
+
+  rounds.forEach(
+    (round, roundIndex) => {
+      const x =
+        PAD_X +
+        roundIndex *
+          (MATCH_WIDTH +
+            ROUND_GAP);
+
+      headers.push({
+        id: `${variant}-${round.id}`,
+        name: round.name,
+        subtitle: `RONDA ${
+          roundIndex + 1
+        }`,
+        x,
+        top: sectionHeaderTop,
+        width: MATCH_WIDTH,
+        variant,
+      });
+
+      if (roundIndex === 0) {
+        let visibleMatchIndex = 0;
+
+        /**
+         * Primero posicionamos únicamente
+         * los partidos visibles.
+         */
+        for (const match of round.matches) {
+          const isHiddenBye =
+            variant === "winner" &&
+            match.automaticAdvance &&
+            Number(Boolean(match.team1)) +
+              Number(Boolean(match.team2)) <
+              2;
+
+          if (isHiddenBye) {
+            continue;
+          }
+
+          const centerY =
+            sectionTop +
+            PAD_Y +
+            SLOT_HEIGHT / 2 +
+            visibleMatchIndex *
+              SLOT_HEIGHT;
+
+          positions[match.id] = {
+            x,
+            centerY,
+            top:
+              centerY -
+              MATCH_HEIGHT / 2,
+          };
+
+          visibleMatches.push(match);
+
+          visibleMatchIndex += 1;
+        }
+
+        /**
+         * Los BYEs ocultos reciben la misma
+         * posición vertical que su partido hermano.
+         *
+         * De esta forma siguen alimentando
+         * correctamente la siguiente ronda,
+         * pero no dejan un espacio vacío.
+         */
+        for (const match of round.matches) {
+          const isHiddenBye =
+            variant === "winner" &&
+            match.automaticAdvance &&
+            Number(Boolean(match.team1)) +
+              Number(Boolean(match.team2)) <
+              2;
+
+          if (!isHiddenBye) {
+            continue;
+          }
+
+          const siblingMatchIndex =
+            match.matchIndex % 2 === 0
+              ? match.matchIndex + 1
+              : match.matchIndex - 1;
+
+          const siblingMatch =
+            round.matches[
+              siblingMatchIndex
+            ];
+
+          const siblingPosition =
+            siblingMatch
+              ? positions[
+                  siblingMatch.id
+                ]
+              : null;
+
+          const fallbackCenterY =
+            sectionTop +
+            PAD_Y +
+            SLOT_HEIGHT / 2;
+
+          const centerY =
+            siblingPosition?.centerY ??
+            fallbackCenterY;
+
+          positions[match.id] = {
+            x,
+            centerY,
+            top:
+              centerY -
+              MATCH_HEIGHT / 2,
+          };
+        }
+
+        return;
+      }
+
+      round.matches.forEach(
+        (
+          match,
+          matchIndex
+        ) => {
+          const previousRound =
+  rounds[
+    roundIndex - 1
+  ];
+
+const sameMatchCount =
+  previousRound.matches.length ===
+  round.matches.length;
+
+let centerY: number;
+
+/**
+ * En las rondas del Loser Bracket que conservan
+ * la misma cantidad de partidos, cada encuentro
+ * continúa alineado con el partido anterior
+ * que ocupa el mismo índice.
+ *
+ * Ejemplo:
+ * Loser R1: 2 partidos
+ * Loser R2: 2 partidos
+ */
+if (
+  variant === "loser" &&
+  sameMatchCount
+) {
+  const previousMatch =
+    previousRound.matches[
+      matchIndex
+    ];
+
+  const previousPosition =
+    previousMatch
+      ? positions[
+          previousMatch.id
+        ]
+      : null;
+
+  if (previousPosition) {
+    centerY =
+      previousPosition.centerY;
+  } else {
+    const spacing =
+      contentHeight /
+      Math.max(
+        1,
+        round.matches.length
+      );
+
+    centerY =
+      sectionTop +
+      spacing / 2 +
+      matchIndex *
+        spacing;
+  }
+} else {
+  /**
+   * Cuando la ronda reduce su cantidad de partidos,
+   * dos encuentros anteriores alimentan uno nuevo.
+   */
+  const firstPrevious =
+    previousRound.matches[
+      matchIndex * 2
+    ];
+
+  const secondPrevious =
+    previousRound.matches[
+      matchIndex * 2 + 1
+    ];
+
+  const firstPosition =
+    firstPrevious
+      ? positions[
+          firstPrevious.id
+        ]
+      : null;
+
+  const secondPosition =
+    secondPrevious
+      ? positions[
+          secondPrevious.id
+        ]
+      : null;
+
+  if (
+    firstPosition &&
+    secondPosition
+  ) {
+    centerY =
+      (
+        firstPosition.centerY +
+        secondPosition.centerY
+      ) / 2;
+  } else if (firstPosition) {
+    centerY =
+      firstPosition.centerY;
+  } else if (secondPosition) {
+    centerY =
+      secondPosition.centerY;
+  } else {
+    const spacing =
+      contentHeight /
+      Math.max(
+        1,
+        round.matches.length
+      );
+
+    centerY =
+      sectionTop +
+      spacing / 2 +
+      matchIndex *
+        spacing;
+  }
+}
+if (
+  variant === "winner" &&
+  roundIndex === 1 &&
+  matchIndex === 0
+) {
+  centerY -= 24;
+}
+          positions[match.id] = {
+            x,
+            centerY,
+            top:
+              centerY -
+              MATCH_HEIGHT / 2,
+          };
+
+          visibleMatches.push(match);
+        }
+      );
+    }
+  );
+}
+function SectionLabels({
+  labels,
+}: {
+  labels: SectionLabel[];
 }) {
   return (
     <>
-      {bracket.rounds.map((round, index) => {
-        const x = PAD_X + index * (MATCH_WIDTH + ROUND_GAP);
+      {labels.map((label) => (
+        <div
+          key={label.id}
+          className="absolute left-0 flex h-[58px] items-center border-b border-white/10 bg-black/25 px-7"
+          style={{
+            top: label.top,
+            width: "100%",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                label.id ===
+                "winner-section"
+                  ? "bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.8)]"
+                  : "bg-violet-500 shadow-[0_0_14px_rgba(139,92,246,0.8)]"
+              }`}
+            />
 
-        return (
-          <div
-            key={round.id}
-            className="absolute top-0 flex h-[82px] flex-col items-center justify-center border-b border-white/15 text-center"
-            style={{
-              left: x,
-              width: MATCH_WIDTH,
-            }}
-          >
-            <p className="text-sm font-black uppercase tracking-wide text-gray-100">
-              {round.name}
-            </p>
-
-            <p className="mt-2 text-[10px] font-black tracking-[0.18em] text-gray-400">
-              RONDA {index + 1}
+            <p className="text-sm font-black tracking-[0.22em] text-white">
+              {label.text}
             </p>
           </div>
-        );
-      })}
+        </div>
+      ))}
+    </>
+  );
+}
 
-      <div
-        className="absolute top-0 flex h-[82px] flex-col items-center justify-center border-b border-yellow-500/30 text-center"
-        style={{
-          left: championX,
-          width: CHAMPION_WIDTH,
-        }}
-      >
-        <p className="text-sm font-black text-yellow-300">CAMPEÓN</p>
+function RoundHeaders({
+  headers,
+}: {
+  headers: RoundHeader[];
+}) {
+  return (
+    <>
+      {headers.map((header) => (
+        <div
+          key={header.id}
+          className={`absolute flex h-[82px] flex-col items-center justify-center border-b text-center ${
+            header.variant ===
+            "winner"
+              ? "border-red-500/25"
+              : header.variant ===
+                  "loser"
+                ? "border-violet-500/25"
+                : "border-yellow-500/30"
+          }`}
+          style={{
+            left: header.x,
+            top: header.top,
+            width: header.width,
+          }}
+        >
+          <p
+            className={`text-sm font-black uppercase tracking-wide ${
+              header.variant ===
+              "winner"
+                ? "text-red-200"
+                : header.variant ===
+                    "loser"
+                  ? "text-violet-200"
+                  : "text-yellow-300"
+            }`}
+          >
+            {header.name}
+          </p>
 
-        <p className="mt-2 text-[10px] font-black tracking-[0.18em] text-yellow-600">
-          GANADOR
-        </p>
-      </div>
+          <p
+            className={`mt-2 text-[10px] font-black tracking-[0.18em] ${
+              header.variant ===
+              "winner"
+                ? "text-red-500/70"
+                : header.variant ===
+                    "loser"
+                  ? "text-violet-500/70"
+                  : "text-yellow-600"
+            }`}
+          >
+            {header.subtitle}
+          </p>
+        </div>
+      ))}
     </>
   );
 }
@@ -299,144 +1238,550 @@ function BracketConnections({
   bracket,
   positions,
   championX,
+  championY,
 }: {
-  bracket: TournamentBracket;
+  bracket: ActiveBracket;
+
   positions: PositionMap;
+
   championX: number;
+
+  championY: number;
 }) {
-  const paths: {
-    id: string;
-    path: string;
-    completed: boolean;
-    champion?: boolean;
-  }[] = [];
-
-  bracket.rounds.forEach((round) => {
-    round.matches.forEach((match) => {
-      if (!match.nextMatchId) {
-        return;
-      }
-
-      const source = positions[match.id];
-
-      const destination = positions[match.nextMatchId];
-
-      if (!source || !destination) {
-        return;
-      }
-
-      const startX = source.x + MATCH_WIDTH;
-
-      const middleX = startX + (destination.x - startX) / 2;
-
-      paths.push({
-        id: `${match.id}-${match.nextMatchId}`,
-        completed: match.completed,
-        path: [
-          `M ${startX} ${source.centerY}`,
-          `H ${middleX}`,
-          `V ${destination.centerY}`,
-          `H ${destination.x}`,
-        ].join(" "),
-      });
-    });
-  });
-
-  const finalRound = bracket.rounds[bracket.rounds.length - 1];
-
-  const finalMatch = finalRound?.matches[0];
-
-  if (finalMatch && positions[finalMatch.id]) {
-    const source = positions[finalMatch.id];
-
-    paths.push({
-      id: "champion",
-      completed: Boolean(bracket.champion),
-      champion: true,
-      path: [
-        `M ${source.x + MATCH_WIDTH} ${source.centerY}`,
-        `H ${championX}`,
-      ].join(" "),
-    });
-  }
+  const paths =
+    isDoubleBracket(bracket)
+      ? createDoubleConnections(
+          bracket,
+          positions,
+          championX,
+          championY
+        )
+      : createSingleConnections(
+          bracket,
+          positions,
+          championX
+        );
 
   return (
     <svg
       className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
       aria-hidden="true"
     >
-      {paths.map((connection) => (
-        <path
-          key={connection.id}
-          d={connection.path}
-          fill="none"
-          stroke={
-            connection.completed
-              ? connection.champion
-                ? "rgba(250,204,21,0.95)"
-                : "rgba(239,68,68,0.95)"
-              : "rgba(148,163,184,0.42)"
-          }
-          strokeWidth={connection.completed ? 2 : 1.5}
-        />
-      ))}
+      {paths.map(
+        (connection) => (
+          <path
+            key={connection.id}
+            d={connection.path}
+            fill="none"
+            stroke={getConnectionColor(
+              connection
+            )}
+            strokeWidth={
+              connection.completed
+                ? 2
+                : 1.5
+            }
+            strokeDasharray={
+              connection.variant ===
+              "drop"
+                ? "6 5"
+                : undefined
+            }
+          />
+        )
+      )}
     </svg>
   );
+}
+
+function createSingleConnections(
+  bracket: TournamentBracket,
+  positions: PositionMap,
+  championX: number
+): ConnectionPath[] {
+  const paths:
+    ConnectionPath[] = [];
+
+  bracket.rounds.forEach(
+    (round) => {
+      round.matches.forEach(
+        (match) => {
+          if (
+            !match.nextMatchId
+          ) {
+            return;
+          }
+
+          const isHiddenBye =
+            match.roundIndex === 0 &&
+            Number(
+              Boolean(match.team1)
+            ) +
+              Number(
+                Boolean(match.team2)
+              ) <
+              2;
+
+          if (isHiddenBye) {
+            return;
+          }
+
+          const source =
+            positions[match.id];
+
+          const destination =
+            positions[
+              match.nextMatchId
+            ];
+
+          if (
+            !source ||
+            !destination
+          ) {
+            return;
+          }
+
+          paths.push({
+            id: `${match.id}-${match.nextMatchId}`,
+            completed:
+              match.completed,
+            variant: "winner",
+            path: createStandardPath(
+              source,
+              destination
+            ),
+          });
+        }
+      );
+    }
+  );
+
+  const finalRound =
+    bracket.rounds[
+      bracket.rounds.length - 1
+    ];
+
+  const finalMatch =
+    finalRound?.matches[0];
+
+  if (
+    finalMatch &&
+    positions[finalMatch.id]
+  ) {
+    const source =
+      positions[finalMatch.id];
+
+    paths.push({
+      id: "single-champion",
+      completed: Boolean(
+        bracket.champion
+      ),
+      variant: "champion",
+      path: [
+        `M ${
+          source.x +
+          MATCH_WIDTH
+        } ${source.centerY}`,
+        `H ${championX}`,
+      ].join(" "),
+    });
+  }
+
+  return paths;
+}
+
+function createDoubleConnections(
+  bracket: DoubleTournamentBracket,
+  positions: PositionMap,
+  championX: number,
+  championY: number
+): ConnectionPath[] {
+  const paths:
+    ConnectionPath[] = [];
+
+  for (
+    const round of
+    bracket.winnerRounds
+  ) {
+    for (
+      const match of
+      round.matches
+    ) {
+      addDoubleMatchConnections({
+        paths,
+        positions,
+        match,
+      });
+    }
+  }
+
+  for (
+    const round of
+    bracket.loserRounds
+  ) {
+    for (
+      const match of
+      round.matches
+    ) {
+      addDoubleMatchConnections({
+        paths,
+        positions,
+        match,
+      });
+    }
+  }
+
+  if (bracket.grandFinal) {
+    addDoubleMatchConnections({
+      paths,
+      positions,
+      match:
+        bracket.grandFinal,
+    });
+  }
+
+const championSource =
+  bracket.grandFinal;
+  
+  if (
+    championSource &&
+    positions[
+      championSource.id
+    ]
+  ) {
+    const source =
+      positions[
+        championSource.id
+      ];
+
+    paths.push({
+      id: "double-champion",
+      completed: Boolean(
+        bracket.champion
+      ),
+      variant: "champion",
+      path: [
+        `M ${
+          source.x +
+          MATCH_WIDTH
+        } ${source.centerY}`,
+        `H ${
+          source.x +
+          MATCH_WIDTH +
+          30
+        }`,
+        `V ${championY}`,
+        `H ${championX}`,
+      ].join(" "),
+    });
+  }
+
+  return paths;
+}
+
+function addDoubleMatchConnections({
+  paths,
+  positions,
+  match,
+}: {
+  paths: ConnectionPath[];
+
+  positions: PositionMap;
+
+  match: DoubleBracketMatch;
+}) {
+  const source =
+    positions[match.id];
+
+  if (!source) {
+    return;
+  }
+
+  if (match.nextMatchId) {
+    const destination =
+      positions[
+        match.nextMatchId
+      ];
+
+    if (destination) {
+      paths.push({
+        id: `${match.id}-winner-${match.nextMatchId}`,
+        completed:
+          match.completed,
+        variant:
+          match.section ===
+          "loser"
+            ? "loser"
+            : match.section ===
+                  "grand-final"
+              ? "final"
+              : "winner",
+        path: createStandardPath(
+          source,
+          destination
+        ),
+      });
+    }
+  }
+
+  if (
+    match.section === "winner" &&
+    match.loserNextMatchId
+  ) {
+    const loserDestination =
+      positions[
+        match.loserNextMatchId
+      ];
+
+    if (loserDestination) {
+      paths.push({
+        id: `${match.id}-loser-${match.loserNextMatchId}`,
+        completed:
+          match.completed,
+        variant: "drop",
+        path: createDropPath(
+          source,
+          loserDestination
+        ),
+      });
+    }
+  }
+}
+
+function createStandardPath(
+  source: MatchPosition,
+  destination: MatchPosition
+): string {
+  const startX =
+    source.x + MATCH_WIDTH;
+
+  const middleX =
+    startX +
+    (destination.x -
+      startX) /
+      2;
+
+  return [
+    `M ${startX} ${source.centerY}`,
+    `H ${middleX}`,
+    `V ${destination.centerY}`,
+    `H ${destination.x}`,
+  ].join(" ");
+}
+
+function createDropPath(
+  source: MatchPosition,
+  destination: MatchPosition
+): string {
+  const startX =
+    source.x + MATCH_WIDTH;
+
+  const offsetX =
+    Math.max(
+      28,
+      (destination.x -
+        startX) /
+        2
+    );
+
+  const middleX =
+    startX + offsetX;
+
+  return [
+    `M ${startX} ${source.centerY}`,
+    `H ${middleX}`,
+    `V ${destination.centerY}`,
+    `H ${destination.x}`,
+  ].join(" ");
+}
+
+function getConnectionColor(
+  connection: ConnectionPath
+): string {
+  if (!connection.completed) {
+    if (
+      connection.variant ===
+      "drop"
+    ) {
+      return "rgba(167,139,250,0.28)";
+    }
+
+    return "rgba(148,163,184,0.34)";
+  }
+
+  if (
+    connection.variant ===
+    "champion"
+  ) {
+    return "rgba(250,204,21,0.95)";
+  }
+
+  if (
+    connection.variant ===
+    "loser" ||
+    connection.variant ===
+    "drop"
+  ) {
+    return "rgba(139,92,246,0.90)";
+  }
+
+  if (
+    connection.variant ===
+    "final"
+  ) {
+    return "rgba(250,204,21,0.88)";
+  }
+
+  return "rgba(239,68,68,0.95)";
 }
 
 function MatchCard({
   match,
   onSelectWinner,
   onResetWinner,
+  liveMatchId,
+  canManageLiveMatch,
+  updatingLiveMatch,
+  onToggleLiveMatch,
 }: {
-  match: BracketMatch;
-  onSelectWinner: (match: BracketMatch, winnerId: string) => void;
-  onResetWinner: (matchId: string) => void;
+  match: ActiveMatch;
+
+  onSelectWinner: (
+    match: ActiveMatch,
+    winnerId: string
+  ) => void;
+
+  onResetWinner: (
+    matchId: string
+  ) => void;
+
+  liveMatchId: string | null;
+
+  canManageLiveMatch: boolean;
+
+  updatingLiveMatch: boolean;
+
+  onToggleLiveMatch: (
+    match: ActiveMatch
+  ) => void;
 }) {
-  const playable = Boolean(match.team1 && match.team2);
+  const playable = Boolean(
+    match.team1 &&
+      match.team2
+  );
+
+  const automaticAdvance =
+    isDoubleMatch(match) &&
+    match.automaticAdvance;
+
+  const section =
+    isDoubleMatch(match)
+      ? match.section
+      : "winner";
+
+  const isLiveMatch =
+    liveMatchId === match.id;
+
+  const canToggleLiveMatch =
+    canManageLiveMatch &&
+    playable &&
+    !automaticAdvance &&
+    (!match.completed || isLiveMatch);
+
+  const borderClass =
+    isLiveMatch
+      ? "border-red-400 shadow-[0_0_28px_rgba(239,68,68,0.28)]"
+      : match.completed
+      ? section === "loser"
+        ? "border-violet-500/45"
+        : section ===
+              "grand-final" ||
+            section ===
+              "reset-final"
+          ? "border-yellow-500/45"
+          : "border-red-500/45"
+      : playable
+        ? "border-white/20 hover:border-red-500/45"
+        : "border-white/15";
+
+  const accentClass =
+    isLiveMatch
+      ? "bg-red-400 shadow-[0_0_14px_rgba(248,113,113,0.95)]"
+      : match.completed
+      ? section === "loser"
+        ? "bg-violet-500"
+        : section ===
+              "grand-final" ||
+            section ===
+              "reset-final"
+          ? "bg-yellow-500"
+          : "bg-red-500"
+      : playable
+        ? "bg-yellow-600/80"
+        : "bg-gray-600";
 
   return (
     <article
-  className={`relative h-full overflow-hidden rounded-xl border
-bg-gradient-to-br from-[#0b1219] via-[#101822] to-[#141f2b]
-backdrop-blur-sm
-shadow-[0_10px_35px_rgba(0,0,0,0.45)]
-transition-all duration-300 ease-out
-hover:-translate-y-1
-hover:scale-[1.02]
-hover:shadow-[0_0_30px_rgba(239,68,68,0.20)]
-${
-  match.completed
-    ? "border-red-500/45"
-    : playable
-      ? "border-white/20 hover:border-red-500/45"
-      : "border-white/15"
-}`}
+      className={`relative h-full overflow-hidden rounded-xl border bg-gradient-to-br from-[#0b1219] via-[#101822] to-[#141f2b] shadow-[0_10px_35px_rgba(0,0,0,0.45)] backdrop-blur-sm transition-all duration-300 ease-out hover:-translate-y-1 hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(239,68,68,0.20)] ${borderClass}`}
     >
       <div
-        className={`absolute left-0 top-0 h-full w-[3px] ${
-          match.completed
-            ? "bg-red-500"
-            : playable
-              ? "bg-yellow-600/80"
-              : "bg-gray-600"
-        }`}
+        className={`absolute left-0 top-0 h-full w-[3px] ${accentClass}`}
       />
 
       <div className="flex h-[28px] items-center justify-between border-b border-white/10 bg-black/30 px-3">
         <span className="text-[9px] font-black text-gray-300">
-          MATCH #{match.matchIndex + 1}
+          MATCH #
+          {match.matchIndex + 1}
         </span>
 
-        <MatchStatus match={match} playable={playable} />
+        <div className="flex items-center gap-2">
+          {canToggleLiveMatch && (
+            <button
+              type="button"
+              onClick={() =>
+                onToggleLiveMatch(
+                  match
+                )
+              }
+              disabled={
+                updatingLiveMatch
+              }
+              title={
+                isLiveMatch
+                  ? "Quitar de transmisión"
+                  : "Transmitir este partido"
+              }
+              className={`rounded-md border px-2 py-1 text-[8px] font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                isLiveMatch
+                  ? "border-red-400/50 bg-red-500/20 text-red-200 hover:bg-red-500/30"
+                  : "border-blue-400/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20"
+              }`}
+            >
+              {isLiveMatch
+                ? "✕ QUITAR"
+                : "📺 STREAM"}
+            </button>
+          )}
+
+          <MatchStatus
+            match={match}
+            playable={playable}
+            live={isLiveMatch}
+          />
+        </div>
       </div>
 
       <TeamRow
         match={match}
         team={match.team1}
         score={match.score1}
-        winner={match.winnerId === match.team1?.id}
-        onSelectWinner={onSelectWinner}
+        winner={
+          match.winnerId ===
+          match.team1?.id
+        }
+        onSelectWinner={
+          onSelectWinner
+        }
       />
 
       <div className="mx-3 h-px bg-white/10" />
@@ -445,21 +1790,38 @@ ${
         match={match}
         team={match.team2}
         score={match.score2}
-        winner={match.winnerId === match.team2?.id}
-        onSelectWinner={onSelectWinner}
+        winner={
+          match.winnerId ===
+          match.team2?.id
+        }
+        onSelectWinner={
+          onSelectWinner
+        }
       />
 
       {match.completed ? (
-        <button
-          type="button"
-          onClick={() => onResetWinner(match.id)}
-          className="absolute bottom-0 left-0 h-[20px] w-full border-t border-white/10 bg-red-950/30 text-[8px] font-black text-red-300 transition hover:bg-red-900/45"
-        >
-          CORREGIR RESULTADO
-        </button>
+        automaticAdvance ? (
+          <div className="absolute bottom-0 left-0 flex h-[20px] w-full items-center justify-center border-t border-white/10 bg-amber-950/30 text-[8px] font-black text-amber-300">
+            AVANCE AUTOMÁTICO POR BYE
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              onResetWinner(
+                match.id
+              )
+            }
+            className="absolute bottom-0 left-0 h-[20px] w-full border-t border-white/10 bg-red-950/30 text-[8px] font-black text-red-300 transition hover:bg-red-900/45"
+          >
+            CORREGIR RESULTADO
+          </button>
+        )
       ) : (
         <div className="absolute bottom-0 left-0 flex h-[20px] w-full items-center justify-center border-t border-white/10 bg-black/20 text-[8px] font-black text-gray-500">
-          {playable ? "CLIC EN EL EQUIPO GANADOR" : "ESPERANDO GANADORES"}
+          {playable
+            ? "CLIC EN EL EQUIPO GANADOR"
+            : "ESPERANDO GANADORES"}
         </div>
       )}
     </article>
@@ -473,13 +1835,23 @@ function TeamRow({
   winner,
   onSelectWinner,
 }: {
-  match: BracketMatch;
+  match: ActiveMatch;
+
   team: BracketTeam | null;
+
   score: number;
+
   winner: boolean;
-  onSelectWinner: (match: BracketMatch, winnerId: string) => void;
+
+  onSelectWinner: (
+    match: ActiveMatch,
+    winnerId: string
+  ) => void;
 }) {
-  const disabled = !team;
+  const disabled =
+    !team ||
+    (isDoubleMatch(match) &&
+      match.automaticAdvance);
 
   return (
     <div
@@ -496,40 +1868,60 @@ function TeamRow({
         disabled={disabled}
         onClick={() => {
           if (team) {
-            onSelectWinner(match, team.id);
+            onSelectWinner(
+              match,
+              team.id
+            );
           }
         }}
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
-        <TeamAvatar team={team} winner={winner} size="small" />
+        <TeamAvatar
+          team={team}
+          winner={winner}
+          size="small"
+        />
 
         <div className="min-w-0 flex-1">
           <p
             className={`truncate text-[12px] font-black ${
-              disabled
+              !team
                 ? "text-gray-300"
                 : winner
                   ? "text-white"
                   : "text-gray-200"
             }`}
           >
-            {team?.name || "Ganador pendiente"}
+            {team?.name ||
+              "Ganador pendiente"}
           </p>
 
           <p className="mt-0.5 text-[8px] font-bold text-gray-500">
-            {disabled ? "POR DEFINIR" : `SEED #${team.seed} · CLIC PARA ELEGIR`}
+            {!team
+              ? "POR DEFINIR"
+              : `SEED #${team.seed} · CLIC PARA ELEGIR`}
           </p>
         </div>
 
-        {winner && <span className="text-green-400">✓</span>}
+        {winner && (
+          <span className="text-green-400">
+            ✓
+          </span>
+        )}
       </button>
 
       <div
         className={`flex h-full w-[42px] items-center justify-center border-l border-white/10 bg-black/30 text-[15px] font-black ${
-          winner ? "text-green-300" : disabled ? "text-gray-500" : "text-white"
+          winner
+            ? "text-green-300"
+            : !team
+              ? "text-gray-500"
+              : "text-white"
         }`}
       >
-        {Number.isFinite(score) ? score : 0}
+        {Number.isFinite(score)
+          ? score
+          : 0}
       </div>
     </div>
   );
@@ -538,21 +1930,85 @@ function TeamRow({
 function MatchStatus({
   match,
   playable,
+  live,
 }: {
-  match: BracketMatch;
+  match: ActiveMatch;
   playable: boolean;
+  live: boolean;
 }) {
-  const text = match.completed
-    ? "FINALIZADO"
-    : playable
-      ? "PENDIENTE"
-      : "BLOQUEADO";
+  const automaticAdvance =
+    isDoubleMatch(match) &&
+    match.automaticAdvance;
 
-  const color = match.completed
-    ? "text-green-400"
-    : playable
-      ? "text-yellow-400"
-      : "text-gray-400";
+  const text = live
+    ? "EN VIVO"
+    : automaticAdvance
+      ? "BYE"
+    : match.completed
+      ? "FINALIZADO"
+      : playable
+        ? "PENDIENTE"
+        : "BLOQUEADO";
 
-  return <span className={`text-[9px] font-black ${color}`}>{text}</span>;
+  const color = live
+    ? "text-red-300"
+    : automaticAdvance
+      ? "text-amber-400"
+    : match.completed
+      ? "text-green-400"
+      : playable
+        ? "text-yellow-400"
+        : "text-gray-400";
+
+  return (
+    <span
+      className={`text-[9px] font-black ${color}`}
+    >
+      {text}
+    </span>
+  );
+}
+
+function DoubleChampionCard({
+  bracket,
+}: {
+  bracket: DoubleTournamentBracket;
+}) {
+  const champion =
+    bracket.champion;
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 via-[#101822] to-[#080d13] shadow-[0_18px_50px_rgba(0,0,0,0.5)]">
+      <div className="border-b border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-center">
+        <p className="text-[10px] font-black tracking-[0.22em] text-yellow-500">
+          CAMPEÓN
+        </p>
+      </div>
+
+      <div className="flex min-h-[150px] flex-col items-center justify-center px-5 py-6 text-center">
+        <TeamAvatar
+          team={champion}
+          winner={Boolean(champion)}
+          size="large"
+        />
+
+        <h3
+          className={`mt-4 max-w-full truncate text-lg font-black ${
+            champion
+              ? "text-yellow-200"
+              : "text-gray-400"
+          }`}
+        >
+          {champion?.name ??
+            "Aún no definido"}
+        </h3>
+
+        <p className="mt-2 text-[9px] font-black tracking-[0.16em] text-gray-500">
+          {champion
+            ? "GANADOR DEL TORNEO"
+            : "ESPERANDO LAS FINALES"}
+        </p>
+      </div>
+    </article>
+  );
 }

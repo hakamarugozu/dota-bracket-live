@@ -1,4 +1,4 @@
-import { BracketTeam } from "../../../lib/bracket";
+import { BracketTeam } from "@/lib/bracket";
 import TeamAvatar from "./TeamAvatar";
 
 type DialogTeamProps = {
