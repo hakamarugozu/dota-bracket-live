@@ -15,9 +15,8 @@ type DashboardLayoutProps = {
 type NavigationItem = {
   label: string;
   description: string;
-  href?: string;
+  href: string;
   icon: string;
-  disabled?: boolean;
 };
 
 const navigationItems: NavigationItem[] = [
@@ -40,22 +39,16 @@ const navigationItems: NavigationItem[] = [
     icon: "◆",
   },
   {
-    label: "Equipos",
-    description: "Próximamente",
-    icon: "♟",
-    disabled: true,
+    label: "Torneos asignados",
+    description: "Torneos donde colaboro",
+    href: "/dashboard/assigned-tournaments",
+    icon: "⚔",
   },
   {
-    label: "Streams",
-    description: "Próximamente",
-    icon: "▶",
-    disabled: true,
-  },
-  {
-    label: "Calendario",
-    description: "Próximamente",
-    icon: "◷",
-    disabled: true,
+    label: "Gestionar permisos",
+    description: "Acceso del staff",
+    href: "/dashboard/permissions",
+    icon: "🔐",
   },
 ];
 
@@ -237,29 +230,6 @@ export default function DashboardLayout({
                       item.href &&
                         pathname.startsWith(item.href),
                     );
-
-              if (item.disabled || !item.href) {
-                return (
-                  <div
-                    key={item.label}
-                    className="flex cursor-not-allowed items-center gap-3 rounded-xl border border-transparent px-3 py-3 opacity-45"
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-lg text-neutral-400">
-                      {item.icon}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-neutral-400">
-                        {item.label}
-                      </p>
-
-                      <p className="mt-0.5 text-xs text-neutral-600">
-                        {item.description}
-                      </p>
-                    </div>
-                  </div>
-                );
-              }
 
               return (
                 <Link

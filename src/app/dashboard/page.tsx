@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { getBracket } from "@/lib/bracketStorage";
 
 type DashboardAction = {
   title: string;
@@ -12,6 +13,164 @@ type DashboardAction = {
   icon: string;
   primary?: boolean;
 };
+
+type TournamentSummary = {
+  id: string;
+  name: string;
+  game: string;
+  format: string | null;
+  mode: "team" | "individual" | null;
+  teams: number | null;
+  status: string | null;
+  date: string | null;
+  created_at: string | null;
+};
+
+
+type DashboardTeam = {
+  name?: string | null;
+};
+
+type DashboardMatch = {
+  id?: string;
+  team1?: DashboardTeam | null;
+  team2?: DashboardTeam | null;
+  completed?: boolean;
+  automaticAdvance?: boolean;
+};
+
+type DashboardRound = {
+  matches?: DashboardMatch[];
+};
+
+type DashboardBracket = {
+  rounds?: DashboardRound[];
+  winnerRounds?: DashboardRound[];
+  loserRounds?: DashboardRound[];
+  grandFinal?: DashboardMatch | null;
+  resetFinal?: DashboardMatch | null;
+};
+
+type NextMatchSummary = {
+  tournamentId: string;
+  tournamentName: string;
+  team1Name: string;
+  team2Name: string;
+};
+
+function collectBracketMatches(
+  bracket: unknown,
+): DashboardMatch[] {
+  if (
+    !bracket ||
+    typeof bracket !== "object" ||
+    Array.isArray(bracket)
+  ) {
+    return [];
+  }
+
+  const parsedBracket =
+    bracket as DashboardBracket;
+
+  const matches: DashboardMatch[] = [];
+
+  function addRounds(
+    rounds: DashboardRound[] | undefined,
+  ) {
+    if (!Array.isArray(rounds)) {
+      return;
+    }
+
+    for (const round of rounds) {
+      if (!Array.isArray(round.matches)) {
+        continue;
+      }
+
+      matches.push(...round.matches);
+    }
+  }
+
+  addRounds(parsedBracket.rounds);
+  addRounds(parsedBracket.winnerRounds);
+  addRounds(parsedBracket.loserRounds);
+
+  if (parsedBracket.grandFinal) {
+    matches.push(parsedBracket.grandFinal);
+  }
+
+  if (
+    parsedBracket.resetFinal &&
+    (
+      parsedBracket.resetFinal.team1 ||
+      parsedBracket.resetFinal.team2 ||
+      parsedBracket.resetFinal.completed
+    )
+  ) {
+    matches.push(parsedBracket.resetFinal);
+  }
+
+  return matches;
+}
+
+function isAutomaticAdvance(
+  match: DashboardMatch,
+) {
+  return Boolean(match.automaticAdvance);
+}
+
+function getTeamName(
+  team: DashboardTeam | null | undefined,
+) {
+  return team?.name?.trim() || "";
+}
+
+function getTournamentDateValue(
+  tournament: TournamentSummary,
+) {
+  if (!tournament.date) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const normalizedDate =
+    tournament.date.includes("T")
+      ? tournament.date
+      : `${tournament.date}T12:00:00`;
+
+  const timestamp =
+    new Date(normalizedDate).getTime();
+
+  return Number.isNaN(timestamp)
+    ? Number.MAX_SAFE_INTEGER
+    : timestamp;
+}
+
+function getTournamentPriority(
+  tournament: TournamentSummary,
+) {
+  const normalizedStatus =
+    normalizeText(tournament.status ?? "");
+
+  if (normalizedStatus.includes("curso")) {
+    return 0;
+  }
+
+  if (
+    normalizedStatus.includes("inscripciones") ||
+    normalizedStatus.includes("proxim")
+  ) {
+    return 1;
+  }
+
+  if (normalizedStatus.includes("borrador")) {
+    return 2;
+  }
+
+  if (normalizedStatus.includes("finalizado")) {
+    return 4;
+  }
+
+  return 3;
+}
 
 const dashboardActions: DashboardAction[] = [
   {
@@ -26,28 +185,337 @@ const dashboardActions: DashboardAction[] = [
     title: "Administrar torneos",
     description:
       "Consulta tus competencias, resultados y enfrentamientos.",
-   href: "/tournaments",
+    href: "/tournaments",
     icon: "◆",
   },
 ];
 
+function formatTournamentDate(value: string | null) {
+  if (!value) {
+    return "Fecha por definir";
+  }
+
+  const normalizedValue = value.includes("T") ? value : `${value}T12:00:00`;
+  const parsedDate = new Date(normalizedValue);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Fecha por definir";
+  }
+
+  return new Intl.DateTimeFormat("es-BO", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsedDate);
+}
+
+function normalizeText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function getTournamentStatusClasses(status: string | null) {
+  const normalizedStatus = normalizeText(status ?? "");
+
+  if (normalizedStatus.includes("finalizado")) {
+    return "border-emerald-500/20 bg-emerald-500/10 text-emerald-400";
+  }
+
+  if (normalizedStatus.includes("curso")) {
+    return "border-amber-500/20 bg-amber-500/10 text-amber-400";
+  }
+
+  if (normalizedStatus.includes("inscripciones")) {
+    return "border-sky-500/20 bg-sky-500/10 text-sky-400";
+  }
+
+  if (normalizedStatus.includes("proxim")) {
+    return "border-violet-500/20 bg-violet-500/10 text-violet-400";
+  }
+
+  if (normalizedStatus.includes("borrador")) {
+    return "border-neutral-500/20 bg-neutral-500/10 text-neutral-400";
+  }
+
+  return "border-white/10 bg-white/[0.04] text-neutral-400";
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [tournaments, setTournaments] = useState<TournamentSummary[]>([]);
+  const [tournamentCount, setTournamentCount] = useState(0);
+  const [participantCount, setParticipantCount] = useState(0);
+  const [matchCount, setMatchCount] = useState(0);
+  const [nextMatch, setNextMatch] = useState<NextMatchSummary | null>(null);
+  const [loadingTournaments, setLoadingTournaments] = useState(true);
+  const [tournamentsError, setTournamentsError] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
-    async function loadUser() {
-      const {
-        data: { user: authenticatedUser },
-      } = await supabase.auth.getUser();
+    async function loadDashboard() {
+      setLoadingTournaments(true);
+      setTournamentsError("");
 
-      if (mounted) {
+      try {
+        const {
+          data: { user: authenticatedUser },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (!mounted) {
+          return;
+        }
+
+        if (userError || !authenticatedUser) {
+          throw new Error(
+            userError?.message ||
+              "No se pudo verificar la sesión del usuario.",
+          );
+        }
+
         setUser(authenticatedUser);
+
+        const {
+          data: tournamentData,
+          error: tournamentsQueryError,
+          count,
+        } = await supabase
+          .from("tournaments")
+          .select(
+            `
+              id,
+              name,
+              game,
+              format,
+              mode,
+              teams,
+              status,
+              date,
+              created_at
+            `,
+            {
+              count: "exact",
+            },
+          )
+          .eq("user_id", authenticatedUser.id)
+          .order("created_at", {
+            ascending: false,
+          });
+
+        if (!mounted) {
+          return;
+        }
+
+        if (tournamentsQueryError) {
+          throw new Error(
+            tournamentsQueryError.message,
+          );
+        }
+
+        const loadedTournaments =
+          (tournamentData ?? []) as TournamentSummary[];
+
+        const tournamentIds =
+          loadedTournaments.map(
+            (tournament) => tournament.id,
+          );
+
+        let loadedParticipantCount = 0;
+
+        if (tournamentIds.length > 0) {
+          const {
+            error: participantsQueryError,
+            count: participantsCount,
+          } = await supabase
+            .from("teams")
+            .select("id", {
+              count: "exact",
+              head: true,
+            })
+            .in(
+              "tournament_id",
+              tournamentIds,
+            );
+
+          if (participantsQueryError) {
+            console.error(
+              "No se pudo contar a los participantes:",
+              participantsQueryError.message,
+            );
+          } else {
+            loadedParticipantCount =
+              participantsCount ?? 0;
+          }
+        }
+
+        const bracketResults =
+          await Promise.allSettled(
+            loadedTournaments.map(
+              async (tournament) => ({
+                tournament,
+                bracket:
+                  await getBracket(
+                    tournament.id,
+                  ),
+              }),
+            ),
+          );
+
+        let loadedMatchCount = 0;
+
+        const loadedBrackets =
+          bracketResults.flatMap(
+            (result) => {
+              if (result.status === "fulfilled") {
+                return [result.value];
+              }
+
+              console.error(
+                "No se pudo cargar uno de los fixtures:",
+                result.reason,
+              );
+
+              return [];
+            },
+          );
+
+        for (const item of loadedBrackets) {
+          const tournamentMatches =
+            collectBracketMatches(
+              item.bracket,
+            );
+
+          loadedMatchCount +=
+            tournamentMatches.filter(
+              (match) =>
+                !isAutomaticAdvance(match),
+            ).length;
+        }
+
+        const prioritizedBrackets =
+          [...loadedBrackets].sort(
+            (first, second) =>
+              getTournamentPriority(
+                first.tournament,
+              ) -
+                getTournamentPriority(
+                  second.tournament,
+                ) ||
+              getTournamentDateValue(
+                first.tournament,
+              ) -
+                getTournamentDateValue(
+                  second.tournament,
+                ),
+          );
+
+        let loadedNextMatch:
+          NextMatchSummary | null = null;
+
+        for (const item of prioritizedBrackets) {
+          if (
+            normalizeText(
+              item.tournament.status ?? "",
+            ).includes("finalizado")
+          ) {
+            continue;
+          }
+
+          const pendingMatch =
+            collectBracketMatches(
+              item.bracket,
+            ).find((match) => {
+              const team1Name =
+                getTeamName(match.team1);
+
+              const team2Name =
+                getTeamName(match.team2);
+
+              return (
+                !match.completed &&
+                !isAutomaticAdvance(match) &&
+                Boolean(team1Name) &&
+                Boolean(team2Name)
+              );
+            });
+
+          if (!pendingMatch) {
+            continue;
+          }
+
+          loadedNextMatch = {
+            tournamentId:
+              item.tournament.id,
+            tournamentName:
+              item.tournament.name,
+            team1Name:
+              getTeamName(
+                pendingMatch.team1,
+              ),
+            team2Name:
+              getTeamName(
+                pendingMatch.team2,
+              ),
+          };
+
+          break;
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setTournaments(
+          loadedTournaments.slice(0, 4),
+        );
+
+        setTournamentCount(
+          count ?? loadedTournaments.length,
+        );
+
+        setParticipantCount(
+          loadedParticipantCount,
+        );
+
+        setMatchCount(
+          loadedMatchCount,
+        );
+
+        setNextMatch(
+          loadedNextMatch,
+        );
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        console.error(
+          "Error al cargar el dashboard:",
+          error,
+        );
+
+        setTournaments([]);
+        setTournamentCount(0);
+        setParticipantCount(0);
+        setMatchCount(0);
+        setNextMatch(null);
+
+        setTournamentsError(
+          error instanceof Error
+            ? error.message
+            : "No se pudieron cargar los datos del dashboard.",
+        );
+      } finally {
+        if (mounted) {
+          setLoadingTournaments(false);
+        }
       }
     }
 
-    loadUser();
+    void loadDashboard();
 
     return () => {
       mounted = false;
@@ -79,13 +547,12 @@ export default function DashboardPage() {
             </div>
 
             <h2 className="text-3xl font-black tracking-tight text-white sm:text-4xl lg:text-5xl">
-              Bienvenido,{" "}
-              <span className="text-red-500">{firstName}</span>
+              Bienvenido, <span className="text-red-500">{firstName}</span>
             </h2>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-400 sm:text-base">
-              Organiza torneos, administra participantes y controla cada fase
-              de la competencia desde un solo lugar.
+              Organiza torneos, administra participantes y controla cada fase de
+              la competencia desde un solo lugar.
             </p>
           </div>
 
@@ -105,10 +572,12 @@ export default function DashboardPage() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-500">
-                Torneos activos
+                Torneos creados
               </p>
 
-              <p className="mt-3 text-3xl font-black text-white">0</p>
+              <p className="mt-3 text-3xl font-black text-white">
+                {loadingTournaments ? "—" : tournamentCount}
+              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-600/10 text-xl text-red-400">
@@ -117,7 +586,11 @@ export default function DashboardPage() {
           </div>
 
           <p className="mt-4 text-xs text-neutral-600">
-            Aún no existen torneos activos.
+            {loadingTournaments
+              ? "Cargando tus eventos..."
+              : tournamentCount === 0
+                ? "Aún no existen torneos creados."
+                : "Eventos registrados en tu cuenta."}
           </p>
         </article>
 
@@ -128,7 +601,11 @@ export default function DashboardPage() {
                 Participantes
               </p>
 
-              <p className="mt-3 text-3xl font-black text-white">0</p>
+              <p className="mt-3 text-3xl font-black text-white">
+                {loadingTournaments
+                  ? "—"
+                  : participantCount}
+              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.05] text-xl text-neutral-300">
@@ -148,7 +625,11 @@ export default function DashboardPage() {
                 Partidas
               </p>
 
-              <p className="mt-3 text-3xl font-black text-white">0</p>
+              <p className="mt-3 text-3xl font-black text-white">
+                {loadingTournaments
+                  ? "—"
+                  : matchCount}
+              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.05] text-xl text-neutral-300">
@@ -168,7 +649,13 @@ export default function DashboardPage() {
                 Próxima partida
               </p>
 
-              <p className="mt-3 text-xl font-black text-white">Sin definir</p>
+              <p className="mt-3 line-clamp-2 text-xl font-black text-white">
+                {loadingTournaments
+                  ? "Cargando..."
+                  : nextMatch
+                    ? `${nextMatch.team1Name} vs ${nextMatch.team2Name}`
+                    : "Sin definir"}
+              </p>
             </div>
 
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.05] text-xl text-neutral-300">
@@ -176,9 +663,25 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <p className="mt-4 text-xs text-neutral-600">
-            Aparecerá cuando programes un encuentro.
-          </p>
+          {nextMatch ? (
+            <div className="mt-4">
+              <p className="line-clamp-1 text-xs text-neutral-600">
+                Torneo: {nextMatch.tournamentName}
+              </p>
+
+              <Link
+                href={`/tournaments/${nextMatch.tournamentId}/bracket`}
+                className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-red-400 transition hover:text-red-300"
+              >
+                Ver encuentro
+                <span>→</span>
+              </Link>
+            </div>
+          ) : (
+            <p className="mt-4 text-xs text-neutral-600">
+              No hay enfrentamientos pendientes con ambos participantes definidos.
+            </p>
+          )}
         </article>
       </section>
 
@@ -292,39 +795,145 @@ export default function DashboardPage() {
       <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-[#101012]">
         <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
-            <h3 className="text-xl font-bold text-white">Actividad reciente</h3>
+            <h3 className="text-xl font-bold text-white">Torneos recientes</h3>
 
             <p className="mt-1 text-sm text-neutral-500">
-              Tus últimas acciones aparecerán en esta sección.
+              Continúa administrando tus últimos campeonatos.
             </p>
           </div>
 
-          <span className="w-fit rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-neutral-500">
-            Sin actividad
+          <span className="w-fit rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-neutral-400">
+            {loadingTournaments
+              ? "Cargando..."
+              : `${tournamentCount} ${
+                  tournamentCount === 1 ? "torneo" : "torneos"
+                }`}
           </span>
         </div>
 
-        <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-3xl text-neutral-600">
-            ◇
+        {loadingTournaments ? (
+          <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
+            <div className="h-11 w-11 animate-spin rounded-full border-4 border-white/10 border-t-red-500" />
+
+            <p className="mt-5 text-sm font-semibold text-neutral-500">
+              Cargando tus torneos...
+            </p>
           </div>
+        ) : tournamentsError ? (
+          <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-red-500/20 bg-red-600/10 text-2xl font-black text-red-400">
+              !
+            </div>
 
-          <h4 className="mt-5 text-lg font-bold text-neutral-300">
-            Todavía no hay actividad
-          </h4>
+            <h4 className="mt-5 text-lg font-bold text-neutral-300">
+              No se pudieron cargar los torneos
+            </h4>
 
-          <p className="mt-2 max-w-md text-sm leading-6 text-neutral-600">
-            Cuando crees tu primer torneo, aquí aparecerán sus avances,
-            resultados y actualizaciones importantes.
-          </p>
+            <p className="mt-2 max-w-md text-sm leading-6 text-neutral-600">
+              {tournamentsError}
+            </p>
+          </div>
+        ) : tournaments.length === 0 ? (
+          <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-3xl text-neutral-600">
+              ◇
+            </div>
 
-          <Link
-            href="/create"
-            className="mt-6 inline-flex items-center gap-2 rounded-xl border border-red-500/25 bg-red-600/10 px-5 py-3 text-sm font-bold text-red-400 transition hover:border-red-500/50 hover:bg-red-600 hover:text-white"
-          >
-            ＋ Crear mi primer torneo
-          </Link>
-        </div>
+            <h4 className="mt-5 text-lg font-bold text-neutral-300">
+              Todavía no tienes torneos
+            </h4>
+
+            <p className="mt-2 max-w-md text-sm leading-6 text-neutral-600">
+              Cuando crees tu primer torneo, aparecerá aquí para que puedas
+              continuar administrándolo.
+            </p>
+
+            <Link
+              href="/create"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl border border-red-500/25 bg-red-600/10 px-5 py-3 text-sm font-bold text-red-400 transition hover:border-red-500/50 hover:bg-red-600 hover:text-white"
+            >
+              ＋ Crear mi primer torneo
+            </Link>
+          </div>
+        ) : (
+          <>
+            <div className="divide-y divide-white/10">
+              {tournaments.map((tournament) => {
+                const participantLabel =
+                  tournament.mode === "individual" ? "jugadores" : "equipos";
+                const tournamentInitial =
+                  tournament.name.trim().charAt(0).toUpperCase() || "T";
+
+                return (
+                  <article
+                    key={tournament.id}
+                    className="group flex flex-col gap-4 px-5 py-5 transition hover:bg-white/[0.025] sm:px-6 lg:flex-row lg:items-center lg:justify-between"
+                  >
+                    <div className="flex min-w-0 items-start gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-red-500/20 bg-red-600/10 text-lg font-black text-red-400">
+                        {tournamentInitial}
+                      </div>
+
+                      <div className="min-w-0">
+                        <h4 className="truncate text-base font-black text-white transition group-hover:text-red-400 sm:text-lg">
+                          {tournament.name}
+                        </h4>
+
+                        <p className="mt-1 text-sm leading-6 text-neutral-500">
+                          {tournament.game} ·{" "}
+                          {tournament.format || "Formato por definir"} ·{" "}
+                          {typeof tournament.teams === "number"
+                            ? `${tournament.teams} ${participantLabel}`
+                            : "Participantes por definir"}
+                        </p>
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-600">
+                          <span>
+                            Fecha del torneo: {formatTournamentDate(tournament.date)}
+                          </span>
+                          <span className="text-neutral-800">•</span>
+                          <span>
+                            Creado: {formatTournamentDate(tournament.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+                      <span
+                        className={`w-fit rounded-full border px-3 py-1.5 text-xs font-bold ${getTournamentStatusClasses(
+                          tournament.status,
+                        )}`}
+                      >
+                        {tournament.status || "Estado por definir"}
+                      </span>
+
+                      <Link
+                        href={`/tournaments/${tournament.id}`}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-4 py-2.5 text-sm font-bold text-neutral-300 transition hover:border-red-500/30 hover:bg-red-600/10 hover:text-red-400"
+                      >
+                        Abrir torneo
+                        <span className="transition group-hover:translate-x-1">
+                          →
+                        </span>
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-center border-t border-white/10 px-5 py-5 sm:px-6">
+              <Link
+                href="/tournaments"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-neutral-300 transition hover:border-red-500/30 hover:bg-red-600/10 hover:text-red-400"
+              >
+                Ver todos mis torneos
+                <span>→</span>
+              </Link>
+            </div>
+          </>
+        )}
       </section>
     </div>
   );

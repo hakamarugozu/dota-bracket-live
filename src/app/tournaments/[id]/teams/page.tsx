@@ -5,19 +5,10 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } fro
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
-  createTeam,
-  deleteTeam,
   getTeams,
   type Team,
 } from "@/lib/teams";
-import {
-  getBracket,
-  saveBracket as saveBracketToSupabase,
-} from "@/lib/bracketStorage";
-import type {
-  BracketTeam,
-  TournamentBracket,
-} from "@/lib/bracket";
+import { getBracket } from "@/lib/bracketStorage";
 
 type Tournament = {
   id: string;
@@ -62,104 +53,8 @@ function normalizeOptionalValue(value: string) {
   return normalized.length > 0 ? normalized : null;
 }
 
-type EditableBracket = TournamentBracket & Record<string, unknown>;
-
 function normalizeTeamName(name: string) {
   return name.trim().toLowerCase();
-}
-
-function isBracketTeam(value: unknown): value is BracketTeam {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.name === "string" &&
-    typeof candidate.seed === "number"
-  );
-}
-
-/**
- * Cambia únicamente el nombre visible del participante dentro
- * del fixture guardado.
- *
- * No genera una llave nueva y no modifica:
- * - identificadores;
- * - seeds;
- * - resultados;
- * - ganadores;
- * - posiciones;
- * - avances;
- * - campeón.
- */
-function renameParticipantReferences(
-  value: unknown,
-  previousName: string,
-  newName: string,
-  visited: WeakSet<object>,
-): void {
-  if (!value || typeof value !== "object") {
-    return;
-  }
-
-  if (visited.has(value)) {
-    return;
-  }
-
-  visited.add(value);
-
-  if (
-    isBracketTeam(value) &&
-    normalizeTeamName(value.name) === normalizeTeamName(previousName)
-  ) {
-    value.name = newName;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      renameParticipantReferences(
-        item,
-        previousName,
-        newName,
-        visited,
-      );
-    }
-
-    return;
-  }
-
-  for (const nestedValue of Object.values(
-    value as Record<string, unknown>,
-  )) {
-    renameParticipantReferences(
-      nestedValue,
-      previousName,
-      newName,
-      visited,
-    );
-  }
-}
-
-function renameParticipantInsideBracket(
-  currentBracket: TournamentBracket,
-  previousName: string,
-  newName: string,
-): TournamentBracket {
-  const bracket = structuredClone(currentBracket) as EditableBracket;
-
-  renameParticipantReferences(
-    bracket,
-    previousName,
-    newName,
-    new WeakSet<object>(),
-  );
-
-  bracket.updatedAt = new Date().toISOString();
-
-  return bracket;
 }
 
 function revokePreviewUrl(previewUrl: string) {
@@ -190,6 +85,12 @@ export default function TournamentTeamsPage() {
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  const [isTournamentOwner, setIsTournamentOwner] =
+    useState(false);
+
+  const [canManageBracket, setCanManageBracket] =
+    useState(false);
 
   const teamLimit = tournament?.teams ?? 0;
   const registeredTeams = teams.length;
@@ -231,7 +132,10 @@ export default function TournamentTeamsPage() {
         return;
       }
 
-      const { data: tournamentData, error: tournamentError } = await supabase
+      const {
+        data: tournamentData,
+        error: tournamentError,
+      } = await supabase
         .from("tournaments")
         .select(
           `
@@ -252,24 +156,111 @@ export default function TournamentTeamsPage() {
           `,
         )
         .eq("id", tournamentId)
-        .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (tournamentError || !tournamentData) {
+      if (tournamentError) {
         throw new Error(
-          tournamentError?.message ||
-            "No se pudo encontrar el torneo solicitado.",
+          tournamentError.message ||
+            "No se pudo consultar el torneo solicitado.",
         );
       }
 
-      const [loadedTeams, loadedBracket] = await Promise.all([
-        getTeams(tournamentId),
-        getBracket(tournamentId),
-      ]);
+      if (!tournamentData) {
+        throw new Error(
+          "El torneo no existe o no tienes acceso autorizado.",
+        );
+      }
 
-      setTournament(tournamentData as Tournament);
+      const owner =
+        tournamentData.user_id === user.id;
+
+      let bracketPermission = owner;
+
+      if (!owner) {
+        const {
+          data: permissionData,
+          error: permissionError,
+        } = await supabase
+          .from(
+            "tournament_permissions",
+          )
+          .select(
+            "can_manage_bracket, can_manage_participants",
+          )
+          .eq(
+            "tournament_id",
+            tournamentId,
+          )
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (permissionError) {
+          throw new Error(
+            permissionError.message ||
+              "No se pudieron comprobar tus permisos.",
+          );
+        }
+
+        if (
+          permissionData?.can_manage_participants !==
+          true
+        ) {
+          throw new Error(
+            "No tienes permiso para administrar los participantes de este torneo.",
+          );
+        }
+
+        bracketPermission =
+          permissionData.can_manage_bracket ===
+          true;
+      }
+
+      const {
+        data: synchronizedByes,
+        error: synchronizeError,
+      } = await supabase.rpc(
+        "sync_tournament_participants_into_byes",
+        {
+          p_tournament_id:
+            tournamentId,
+        },
+      );
+
+      if (synchronizeError) {
+        throw new Error(
+          synchronizeError.message ||
+            "No se pudieron sincronizar los participantes pendientes con los pases libres del fixture.",
+        );
+      }
+
+      const [loadedTeams, loadedBracket] =
+        await Promise.all([
+          getTeams(tournamentId),
+          getBracket(tournamentId),
+        ]);
+
+      const synchronizedCount =
+        Number(synchronizedByes) || 0;
+
+      if (synchronizedCount > 0) {
+        setSuccessMessage(
+          synchronizedCount === 1
+            ? "Un participante pendiente ocupó automáticamente un pase libre del fixture sin reordenar la llave."
+            : `${synchronizedCount} participantes pendientes ocuparon automáticamente pases libres del fixture sin reordenar la llave.`,
+        );
+      }
+
+      setIsTournamentOwner(owner);
+      setCanManageBracket(
+        bracketPermission,
+      );
+      setTournament(
+        tournamentData as Tournament,
+      );
       setTeams(loadedTeams);
-      setBracketStarted(Boolean(loadedBracket));
+      setBracketStarted(
+        Boolean(loadedBracket),
+      );
     } catch (error) {
       console.error("Error al cargar los equipos:", error);
 
@@ -450,13 +441,6 @@ export default function TournamentTeamsPage() {
       ? teams.find((team) => team.id === editingTeamId) ?? null
       : null;
 
-    if (bracketStarted && !editingTeam) {
-      setErrorMessage(
-        `El fixture ya fue generado. No se pueden registrar nuevos ${participantPlural}.`,
-      );
-      return;
-    }
-
     if (!editingTeam && tournamentIsFull) {
       return;
     }
@@ -477,81 +461,68 @@ export default function TournamentTeamsPage() {
       const uploadedImageUrl = await uploadParticipantImage();
 
       if (editingTeam) {
-        const newName = formData.name.trim();
-        const newCountry = normalizeOptionalValue(formData.country);
-        const newCaptain = isIndividual
-          ? null
-          : normalizeOptionalValue(formData.captain);
-        const newLogo = uploadedImageUrl
-          ? uploadedImageUrl
-          : removeExistingImage
+        const newName =
+          formData.name.trim();
+
+        const newCountry =
+          normalizeOptionalValue(
+            formData.country,
+          );
+
+        const newCaptain =
+          isIndividual
             ? null
-            : editingTeam.logo ?? null;
-
-        const nameChanged = editingTeam.name !== newName;
-        const savedBracket = bracketStarted
-          ? await getBracket(tournament.id)
-          : null;
-
-        let renamedBracket: TournamentBracket | null = null;
-
-        if (savedBracket && nameChanged) {
-          renamedBracket = renameParticipantInsideBracket(
-            savedBracket,
-            editingTeam.name,
-            newName,
-          );
-
-          await saveBracketToSupabase(
-            tournament.id,
-            renamedBracket,
-          );
-        }
-
-        const teamUpdate: {
-          name: string;
-          country: string | null;
-          captain: string | null;
-          logo?: string | null;
-        } = {
-          name: newName,
-          country: newCountry,
-          captain: newCaptain,
-        };
-
-        /**
-         * Solo enviamos la columna `logo` cuando el administrador
-         * seleccionó una imagen nueva o pidió quitar la actual.
-         * Así una edición únicamente de nombre no intenta modificar
-         * ninguna columna de imagen.
-         */
-        if (uploadedImageUrl || removeExistingImage) {
-          teamUpdate.logo = newLogo;
-        }
-
-        const { error: updateError } = await supabase
-          .from("teams")
-          .update(teamUpdate)
-          .eq("id", editingTeam.id)
-          .eq("tournament_id", tournament.id);
-
-        if (updateError) {
-          if (savedBracket && renamedBracket) {
-            try {
-              await saveBracketToSupabase(
-                tournament.id,
-                savedBracket,
+            : normalizeOptionalValue(
+                formData.captain,
               );
-            } catch (rollbackError) {
-              console.error(
-                "No se pudo restaurar el fixture después del error:",
-                rollbackError,
-              );
-            }
-          }
 
+        const updateLogo =
+          Boolean(uploadedImageUrl) ||
+          removeExistingImage;
+
+        const newLogo =
+          uploadedImageUrl
+            ? uploadedImageUrl
+            : removeExistingImage
+              ? null
+              : editingTeam.logo ??
+                null;
+
+        const {
+          data: updated,
+          error: updateError,
+        } = await supabase.rpc(
+          "update_tournament_participant",
+          {
+            p_tournament_id:
+              tournament.id,
+
+            p_team_id:
+              editingTeam.id,
+
+            p_name:
+              newName,
+
+            p_country:
+              newCountry,
+
+            p_captain:
+              newCaptain,
+
+            p_logo:
+              newLogo,
+
+            p_update_logo:
+              updateLogo,
+          },
+        );
+
+        if (
+          updateError ||
+          updated !== true
+        ) {
           throw new Error(
-            updateError.message ||
+            updateError?.message ||
               `No se pudo actualizar el ${participantSingular}.`,
           );
         }
@@ -579,18 +550,82 @@ export default function TournamentTeamsPage() {
         return;
       }
 
-      const createdTeam = await createTeam(
-        tournament.id,
-        formData.name.trim(),
-        uploadedImageUrl,
-        normalizeOptionalValue(formData.country),
-        isIndividual ? null : normalizeOptionalValue(formData.captain),
+      const newName =
+        formData.name.trim();
+
+      const {
+        data: created,
+        error: createError,
+      } = await supabase.rpc(
+        "create_tournament_participant",
+        {
+          p_tournament_id:
+            tournament.id,
+
+          p_name:
+            newName,
+
+          p_logo:
+            uploadedImageUrl,
+
+          p_country:
+            normalizeOptionalValue(
+              formData.country,
+            ),
+
+          p_captain:
+            isIndividual
+              ? null
+              : normalizeOptionalValue(
+                  formData.captain,
+                ),
+        },
       );
 
-      setTeams((current) => [...current, createdTeam]);
+      if (
+        createError ||
+        created !== true
+      ) {
+        throw new Error(
+          createError?.message ||
+            `No se pudo registrar el ${participantSingular}.`,
+        );
+      }
+
+      const {
+        data: synchronizedByes,
+        error: synchronizeError,
+      } = await supabase.rpc(
+        "sync_tournament_participants_into_byes",
+        {
+          p_tournament_id:
+            tournament.id,
+        },
+      );
+
+      const synchronizedCount =
+        Number(synchronizedByes) || 0;
+
+      const loadedTeams =
+        await getTeams(
+          tournament.id,
+        );
+
+      setTeams(loadedTeams);
       resetParticipantForm();
+
+      if (synchronizeError) {
+        setErrorMessage(
+          `El ${participantSingular} fue registrado, pero no se pudo comprobar el pase libre del fixture: ${synchronizeError.message}`,
+        );
+      }
+
       setSuccessMessage(
-        `El ${participantSingular} "${createdTeam.name}" fue registrado.`,
+        synchronizedCount > 0
+          ? `El ${participantSingular} "${newName}" fue registrado y ocupó un pase libre del fixture sin reordenar la llave.`
+          : bracketStarted
+            ? `El ${participantSingular} "${newName}" fue registrado en la lista oficial. El fixture no tenía un pase libre seguro disponible, por lo que sus cruces actuales no fueron modificados.`
+            : `El ${participantSingular} "${newName}" fue registrado.`,
       );
     } catch (error) {
       console.error(`Error al guardar el ${participantSingular}:`, error);
@@ -605,16 +640,30 @@ export default function TournamentTeamsPage() {
     }
   }
 
-  async function handleDeleteTeam(team: Team) {
+  async function handleDeleteTeam(
+    team: Team,
+  ) {
     if (deletingTeamId) {
       return;
     }
 
-    const confirmed = window.confirm(
-      bracketStarted
-        ? `¿Seguro que deseas eliminar al ${participantSingular} "${team.name}"? El fixture ya generado conservará sus partidos y resultados actuales.`
-        : `¿Seguro que deseas eliminar al ${participantSingular} "${team.name}"?`,
-    );
+    if (
+      bracketStarted &&
+      !isTournamentOwner
+    ) {
+      setErrorMessage(
+        `El fixture ya fue generado. Solo el propietario puede eliminar al ${participantSingular} de la lista oficial.`,
+      );
+
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        bracketStarted
+          ? `¿Seguro que deseas eliminar al ${participantSingular} "${team.name}"? Si ocupó un pase libre y todavía no jugó, se retirará también del fixture y se restaurará el BYE sin reordenar la llave.`
+          : `¿Seguro que deseas eliminar al ${participantSingular} "${team.name}"?`,
+      );
 
     if (!confirmed) {
       return;
@@ -625,24 +674,60 @@ export default function TournamentTeamsPage() {
     setSuccessMessage("");
 
     try {
-      await deleteTeam(team.id);
+      const {
+        data: deleted,
+        error: deleteError,
+      } = await supabase.rpc(
+        "delete_tournament_participant",
+        {
+          p_tournament_id:
+            tournament?.id ??
+            tournamentId,
 
-      setTeams((current) =>
-        current.filter((currentTeam) => currentTeam.id !== team.id),
+          p_team_id:
+            team.id,
+        },
       );
 
-      if (editingTeamId === team.id) {
+      if (
+        deleteError ||
+        deleted !== true
+      ) {
+        throw new Error(
+          deleteError?.message ||
+            `No se pudo eliminar el ${participantSingular}.`,
+        );
+      }
+
+      setTeams((current) =>
+        current.filter(
+          (currentTeam) =>
+            currentTeam.id !==
+            team.id,
+        ),
+      );
+
+      if (
+        editingTeamId === team.id
+      ) {
         resetParticipantForm();
       }
 
-      setSuccessMessage(`El ${participantSingular} "${team.name}" fue eliminado.`);
+      setSuccessMessage(
+        bracketStarted
+          ? `El ${participantSingular} "${team.name}" fue eliminado. Si ocupaba un pase libre sin jugar, el BYE fue restaurado sin reordenar el fixture.`
+          : `El ${participantSingular} "${team.name}" fue eliminado.`,
+      );
     } catch (error) {
-      console.error("Error al eliminar el equipo:", error);
+      console.error(
+        `Error al eliminar el ${participantSingular}:`,
+        error,
+      );
 
       setErrorMessage(
         error instanceof Error
-          ? `No se pudo eliminar el equipo: ${error.message}`
-          : "No se pudo eliminar el equipo.",
+          ? error.message
+          : `No se pudo eliminar el ${participantSingular}.`,
       );
     } finally {
       setDeletingTeamId(null);
@@ -715,10 +800,16 @@ export default function TournamentTeamsPage() {
           </Link>
 
           <Link
-            href={`/tournaments/${tournament.id}`}
+            href={
+              isTournamentOwner
+                ? `/tournaments/${tournament.id}`
+                : "/dashboard/assigned-tournaments"
+            }
             className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
           >
-            ← Centro del Torneo
+            {isTournamentOwner
+              ? "← Centro del Torneo"
+              : "← Torneos asignados"}
           </Link>
         </div>
       </header>
@@ -851,17 +942,21 @@ export default function TournamentTeamsPage() {
               </p>
             </div>
 
-            {bracketStarted && !editingTeamId ? (
+            {bracketStarted && !editingTeamId && (
               <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] p-5">
                 <p className="font-bold text-amber-300">
                   Fixture en curso
                 </p>
 
                 <p className="mt-2 text-sm leading-6 text-amber-500/70">
-                  Ya no se pueden registrar ni eliminar participantes. Usa el botón Editar para corregir sus datos sin modificar la estructura ni los resultados del torneo.
+                  {isTournamentOwner
+                    ? "Puedes registrar, editar o eliminar participantes de la lista oficial. Cuando exista un pase libre seguro, el nuevo participante lo ocupará automáticamente sin reordenar la llave."
+                    : "Puedes registrar nuevos participantes y editar sus datos. Mientras exista el fixture, solo el propietario puede eliminar. Cuando exista un pase libre seguro, el nuevo participante lo ocupará automáticamente sin reordenar la llave."}
                 </p>
               </div>
-            ) : tournamentIsFull && !editingTeamId ? (
+            )}
+
+            {tournamentIsFull && !editingTeamId ? (
               <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-5">
                 <p className="font-bold text-emerald-300">
                   Todos los cupos están completos
@@ -1134,7 +1229,13 @@ export default function TournamentTeamsPage() {
                             <button
                               type="button"
                               onClick={() => void handleDeleteTeam(team)}
-                              disabled={deletingTeamId !== null}
+                              disabled={
+                                deletingTeamId !== null ||
+                                (
+                                  bracketStarted &&
+                                  !isTournamentOwner
+                                )
+                              }
                               className="rounded-lg border border-red-500/20 bg-red-600/5 px-3 py-2 text-xs font-bold text-red-400 transition hover:border-red-500/40 hover:bg-red-600/10 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {deletingTeamId === team.id
@@ -1187,16 +1288,25 @@ export default function TournamentTeamsPage() {
               </h2>
 
               <p className="mt-2 text-sm leading-6 text-neutral-500">
-                Los cambios realizados aquí se aplican al fixture existente sin borrar resultados, avances ni posiciones.
+                Los cambios se guardan automáticamente. Los nombres y los pases libres se sincronizan de forma segura sin reordenar cruces ni borrar resultados.
               </p>
             </div>
 
-            <Link
-              href={`/tournaments/${tournament.id}/bracket`}
-              className="flex shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-white transition hover:bg-emerald-500"
-            >
-              Volver al fixture →
-            </Link>
+            {canManageBracket ? (
+              <Link
+                href={`/tournaments/${tournament.id}/bracket`}
+                className="flex shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-white transition hover:bg-emerald-500"
+              >
+                Ver fixture actualizado →
+              </Link>
+            ) : (
+              <Link
+                href="/dashboard/assigned-tournaments"
+                className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-6 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-neutral-400 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
+              >
+                Torneos asignados →
+              </Link>
+            )}
           </section>
         ) : (
           <section className="mt-6 flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#101012] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -1207,16 +1317,19 @@ export default function TournamentTeamsPage() {
 
               <p className="mt-2 text-sm leading-6 text-neutral-500">
                 {canGenerateBracket
-                  ? `Ya puedes generar el fixture con ${registeredTeams} ${
-                      registeredTeams === 1
-                        ? participantSingular
-                        : participantPlural
-                    }. Aún puedes registrar participantes hasta alcanzar la capacidad máxima de ${teamLimit}.`
-                  : `Registra al menos 2 ${participantPlural} para habilitar la generación del fixture.`}
+                  ? canManageBracket
+                    ? `Ya puedes generar el fixture con ${registeredTeams} ${
+                        registeredTeams === 1
+                          ? participantSingular
+                          : participantPlural
+                      }.`
+                    : `Los participantes ya están preparados. El organizador o un colaborador con permiso de Fixture debe generar la llave.`
+                  : `Registra al menos 2 ${participantPlural} para preparar la generación del fixture.`}
               </p>
             </div>
 
-            {canGenerateBracket ? (
+            {canGenerateBracket &&
+            canManageBracket ? (
               <Link
                 href={`/tournaments/${tournament.id}/bracket`}
                 className="flex shrink-0 items-center justify-center rounded-xl bg-red-600 px-6 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-white transition hover:bg-red-500"
@@ -1229,7 +1342,9 @@ export default function TournamentTeamsPage() {
                 disabled
                 className="flex shrink-0 cursor-not-allowed items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-6 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-neutral-600"
               >
-                Mínimo 2 participantes
+                {canGenerateBracket
+                  ? "Sin permiso de Fixture"
+                  : "Mínimo 2 participantes"}
               </button>
             )}
           </section>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import {
   useEffect,
@@ -48,6 +49,8 @@ import type {
 import ResultModal from "@/components/tournament/ResultModal";
 import BracketCanvas from "@/components/tournament/BracketCanvas";
 import TeamsTab from "@/components/tournament/TeamsTab";
+import ClassificationTab from "@/components/tournament/ClassificationTab";
+import RulesTab from "@/components/tournament/RulesTab";
 import LoadingScreen from "@/components/tournament/LoadingScreen";
 import EmptyTournament from "@/components/tournament/EmptyTournament";
 import ChampionPanel from "@/components/tournament/ChampionPanel";
@@ -70,6 +73,8 @@ type TournamentWithFormat =
   Tournament & {
     format: string;
     stream: string | null;
+    status: string | null;
+    mode: "team" | "individual" | null;
   };
 
 type ActiveBracket =
@@ -117,6 +122,19 @@ function normalizeTournamentFormat(
   return "single";
 }
 
+function isTournamentFinished(
+  status: string | null | undefined
+): boolean {
+  return (
+    String(status ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") ===
+    "finalizado"
+  );
+}
+
 /**
  * Comprueba si un bracket pertenece al motor
  * de doble eliminación.
@@ -140,19 +158,6 @@ function isDoubleMatch(
   return (
     "section" in match &&
     "loserNextMatchId" in match
-  );
-}
-
-/**
- * Obtiene la cantidad real de participantes
- * guardada dentro de cualquier tipo de bracket.
- */
-function getBracketParticipantCount(
-  bracket: ActiveBracket
-): number {
-  return (
-    bracket.participantCount ??
-    bracket.teamCount
   );
 }
 
@@ -182,6 +187,7 @@ function generateTournamentBracket(
 export default function BracketView({
   tournamentId,
 }: Props) {
+  const searchParams = useSearchParams();
   const [tournament, setTournament] =
     useState<TournamentWithFormat | null>(
       null
@@ -218,6 +224,34 @@ export default function BracketView({
 
   const [updatingLiveMatch, setUpdatingLiveMatch] =
     useState(false);
+
+  const [finalizingTournament, setFinalizingTournament] =
+    useState(false);
+
+  const tournamentFinished =
+    isTournamentFinished(
+      tournament?.status
+    );
+
+  useEffect(() => {
+    const requestedTab =
+      searchParams
+        .get("tab")
+        ?.trim()
+        .toUpperCase();
+
+    if (
+      requestedTab === "BRACKET" ||
+      requestedTab === "EQUIPOS" ||
+      requestedTab === "PARTIDOS" ||
+      requestedTab === "REGLAS" ||
+      requestedTab === "CLASIFICACION" ||
+      requestedTab === "STREAM"
+    ) {
+      setActiveTab(requestedTab);
+    }
+  }, [searchParams]);
+
   /**
    * Evita que dos guardados rápidos lleguen
    * a Supabase en un orden incorrecto.
@@ -282,6 +316,8 @@ if (!cancelled) {
             format?: string | null;
             stream?: string | null;
             live_match_id?: string | null;
+            status?: string | null;
+            mode?: "team" | "individual" | null;
           };
 
         const tournamentWithTeams:
@@ -301,6 +337,14 @@ if (!cancelled) {
 
             stream:
               parsedWithFormat.stream ??
+              null,
+
+            status:
+              parsedWithFormat.status ??
+              null,
+
+            mode:
+              parsedWithFormat.mode ??
               null,
           };
 
@@ -357,13 +401,20 @@ if (!cancelled) {
               : "single"
             : null;
 
+        /**
+         * Un fixture guardado es la fuente oficial del torneo.
+         *
+         * Agregar o eliminar participantes en la lista oficial
+         * no debe regenerar la llave ni borrar cruces, resultados,
+         * avances o posiciones existentes.
+         *
+         * Solo se genera un fixture nuevo cuando todavía no existe
+         * uno guardado o cuando el formato almacenado no coincide.
+         */
         const savedBracketIsValid =
           savedBracket !== null &&
           savedBracket.tournamentId ===
             tournamentId &&
-          getBracketParticipantCount(
-            savedBracket
-          ) === participantCount &&
           savedFormat === expectedFormat;
 
         if (savedBracketIsValid) {
@@ -544,6 +595,13 @@ if (!cancelled) {
       return;
     }
 
+    if (tournamentFinished) {
+      setMessage(
+        "El torneo ya está finalizado y no puede marcar partidos en transmisión."
+      );
+      return;
+    }
+
     if (
       !match.team1 ||
       !match.team2
@@ -625,6 +683,13 @@ if (!cancelled) {
     match: ActiveMatch,
     winnerId: string
   ) => {
+    if (tournamentFinished) {
+      setMessage(
+        "El torneo está finalizado. Los resultados ya no pueden modificarse."
+      );
+      return;
+    }
+
     if (
       !match.team1 ||
       !match.team2
@@ -698,6 +763,14 @@ if (!cancelled) {
         !bracket ||
         !dialog
       ) {
+        return;
+      }
+
+      if (tournamentFinished) {
+        setDialog(null);
+        setMessage(
+          "El torneo está finalizado. Los resultados ya no pueden modificarse."
+        );
         return;
       }
 
@@ -797,6 +870,13 @@ if (!cancelled) {
         return;
       }
 
+      if (tournamentFinished) {
+        setMessage(
+          "El torneo está finalizado. Los resultados ya no pueden modificarse."
+        );
+        return;
+      }
+
       try {
         const nextBracket =
           isDoubleBracket(bracket)
@@ -836,6 +916,13 @@ if (!cancelled) {
   const handleResetTournament =
     async () => {
       if (!tournament) {
+        return;
+      }
+
+      if (tournamentFinished) {
+        setMessage(
+          "El torneo está finalizado. El fixture ya no puede reiniciarse."
+        );
         return;
       }
 
@@ -881,6 +968,106 @@ if (!cancelled) {
             "No se pudo reiniciar el fixture."
           )
         );
+      }
+    };
+
+  const handleFinishTournament =
+    async () => {
+      if (
+        !tournament ||
+        !bracket ||
+        !isTournamentOwner ||
+        finalizingTournament
+      ) {
+        return;
+      }
+
+      if (!bracket.champion) {
+        setMessage(
+          "Primero debe definirse el campeón antes de finalizar el torneo."
+        );
+        return;
+      }
+
+      if (tournamentFinished) {
+        setMessage(
+          "Este torneo ya está finalizado."
+        );
+        return;
+      }
+
+      const confirmed =
+        window.confirm(
+          `¿Seguro que quieres finalizar el torneo?\n\nCampeón: ${bracket.champion.name}\n\nDespués de finalizarlo, los resultados quedarán bloqueados.`
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setFinalizingTournament(true);
+
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          throw new Error(
+            "Tu sesión no está disponible. Inicia sesión nuevamente."
+          );
+        }
+
+        const {
+          data: updatedTournament,
+          error: updateError,
+        } = await supabase
+          .from("tournaments")
+          .update({
+            status: "Finalizado",
+            live_match_id: null,
+          })
+          .eq("id", tournamentId)
+          .eq("user_id", user.id)
+          .select("id")
+          .maybeSingle();
+
+        if (
+          updateError ||
+          !updatedTournament
+        ) {
+          throw new Error(
+            updateError?.message ||
+              "No se pudo finalizar el torneo."
+          );
+        }
+
+        setTournament(
+          (currentTournament) =>
+            currentTournament
+              ? {
+                  ...currentTournament,
+                  status: "Finalizado",
+                }
+              : currentTournament
+        );
+
+        setLiveMatchId(null);
+        setDialog(null);
+
+        setMessage(
+          `Torneo finalizado correctamente. Campeón: ${bracket.champion.name}.`
+        );
+      } catch (error) {
+        setMessage(
+          getErrorMessage(
+            error,
+            "No se pudo finalizar el torneo."
+          )
+        );
+      } finally {
+        setFinalizingTournament(false);
       }
     };
 
@@ -962,7 +1149,9 @@ if (!cancelled) {
                   </div>
 
                   <p className="mt-2 text-sm text-gray-400">
-                    Haz clic en el equipo ganador y registra el resultado.
+                    {tournamentFinished
+                      ? "El torneo está finalizado. Los resultados quedan disponibles en modo de consulta."
+                      : "Haz clic en el equipo ganador y registra el resultado."}
                   </p>
                 </div>
 
@@ -971,15 +1160,52 @@ if (!cancelled) {
                     🖱️ MANTÉN CLIC Y ARRASTRA
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleResetTournament();
-                    }}
-                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-black text-red-300 transition hover:bg-red-500/20"
-                  >
-                    REINICIAR FIXTURE
-                  </button>
+                  {isTournamentOwner && (
+                    <>
+                      {tournamentFinished ? (
+                        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-300">
+                          ✓ TORNEO FINALIZADO
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleFinishTournament();
+                          }}
+                          disabled={
+                            !bracket.champion ||
+                            finalizingTournament
+                          }
+                          title={
+                            bracket.champion
+                              ? "Finalizar el torneo y bloquear sus resultados."
+                              : "Primero debe definirse el campeón."
+                          }
+                          className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-600"
+                        >
+                          {finalizingTournament
+                            ? "FINALIZANDO..."
+                            : bracket.champion
+                              ? "FINALIZAR TORNEO"
+                              : "FINAL PENDIENTE"}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleResetTournament();
+                        }}
+                        disabled={
+                          tournamentFinished ||
+                          finalizingTournament
+                        }
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-black text-red-300 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-600"
+                      >
+                        REINICIAR FIXTURE
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -990,7 +1216,10 @@ if (!cancelled) {
     void handleCorrectResult(matchId);
   }}
   liveMatchId={liveMatchId}
-  canManageLiveMatch={isTournamentOwner}
+  canManageLiveMatch={
+    isTournamentOwner &&
+    !tournamentFinished
+  }
   updatingLiveMatch={updatingLiveMatch}
   onToggleLiveMatch={(match) => {
     void handleToggleLiveMatch(match);
@@ -1074,6 +1303,23 @@ if (!cancelled) {
   />
 )}
 
+{activeTab === "REGLAS" && (
+  <RulesTab
+    tournamentId={tournamentId}
+  />
+)}
+
+{activeTab === "CLASIFICACION" && (
+  <ClassificationTab
+    bracket={bracket}
+    participantLabel={
+      tournament.mode === "individual"
+        ? "Jugador"
+        : "Equipo"
+    }
+  />
+)}
+
 {activeTab === "STREAM" && (
   <StreamTab
     tournamentId={tournamentId}
@@ -1081,7 +1327,10 @@ if (!cancelled) {
     streamUrl={tournament.stream}
     bracket={bracket}
     liveMatchId={liveMatchId}
-    isTournamentOwner={isTournamentOwner}
+    isTournamentOwner={
+      isTournamentOwner &&
+      !tournamentFinished
+    }
     updatingLiveMatch={updatingLiveMatch}
     onClearLiveMatch={() => {
       void handleClearLiveMatch();

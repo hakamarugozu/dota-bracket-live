@@ -217,6 +217,33 @@ function getStatusStyles(status: string | null) {
   };
 }
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  textArea.style.top = "0";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  const copied = document.execCommand("copy");
+
+  document.body.removeChild(textArea);
+
+  if (!copied) {
+    throw new Error("El navegador no permitió copiar el enlace.");
+  }
+}
+
 export default function TournamentCenterPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -325,15 +352,23 @@ export default function TournamentCenterPage() {
   const statusStyles = getStatusStyles(tournament?.status ?? null);
 
   async function handleCopyLink() {
+    if (!tournamentId) {
+      setCopyMessage("No se encontró el torneo");
+      return;
+    }
+
+    const fixtureUrl =
+      `${window.location.origin}/tournaments/${tournamentId}/bracket`;
+
     try {
-      await navigator.clipboard.writeText(window.location.href);
-      setCopyMessage("Enlace copiado");
+      await copyTextToClipboard(fixtureUrl);
+      setCopyMessage("Enlace del fixture copiado");
 
       window.setTimeout(() => {
         setCopyMessage("");
       }, 2500);
     } catch (error) {
-      console.error("No se pudo copiar el enlace:", error);
+      console.error("No se pudo copiar el enlace del fixture:", error);
       setCopyMessage("No se pudo copiar");
     }
   }
@@ -651,31 +686,30 @@ export default function TournamentCenterPage() {
             />
 
             <ModuleCard
-              href={`/tournaments/${tournament.id}/matches`}
+              href={`/tournaments/${tournament.id}/bracket?tab=PARTIDOS`}
               icon="⚔"
               eyebrow="Resultados"
               title="Partidos"
               description="Consulta los encuentros pendientes, en vivo y finalizados del torneo."
-              disabled
+              badge="Disponible"
             />
 
             <ModuleCard
-              href={`/tournaments/${tournament.id}/stream`}
+              href={`/tournaments/${tournament.id}/bracket?tab=STREAM`}
               icon="▣"
               eyebrow="Transmisión"
               title="Stream"
               description="Configura los canales oficiales y enlaces de transmisión del evento."
-              disabled
+              badge="Disponible"
             />
 
-            <ModuleCard
-              href={`/tournaments/${tournament.id}/rules`}
-              icon="📜"
-              eyebrow="Información"
-              title="Reglas"
-              description="Publica el reglamento, condiciones y formato oficial de la competencia."
-              disabled
-            />
+           <ModuleCard
+  href={`/tournaments/${tournament.id}/rules`}
+  icon="📜"
+  eyebrow="Información"
+  title="Reglas"
+  description="Consulta la descripción, las condiciones y el reglamento oficial de la competencia."
+/>
 
             <ModuleCard
               href={`/tournaments/${tournament.id}/staff`}
@@ -687,19 +721,19 @@ export default function TournamentCenterPage() {
             />
 
             <ModuleCard
-              href={`/tournaments/${tournament.id}/settings`}
+              href={`/tournaments/${tournament.id}/edit`}
               icon="⚙"
               eyebrow="Configuración"
               title="Ajustes"
               description="Edita la información general, fechas, estado y apariencia del torneo."
-              disabled
+              badge="Disponible"
             />
 
             <ModuleCard
               icon="🔗"
               eyebrow="Difusión"
               title="Compartir torneo"
-              description="Copia el enlace del centro del torneo para compartirlo rápidamente."
+              description="Copia el enlace público del fixture para compartirlo rápidamente."
               onClick={handleCopyLink}
               badge={copyMessage || undefined}
             />
