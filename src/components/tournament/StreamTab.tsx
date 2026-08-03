@@ -27,6 +27,9 @@ type ActiveMatch =
   | BracketMatch
   | DoubleBracketMatch;
 
+type ParticipantLogoMap =
+  Record<string, string>;
+
 type StreamPlatform =
   | "youtube"
   | "twitch"
@@ -44,6 +47,7 @@ type StreamTabProps = {
   tournamentName: string;
   streamUrl: string | null;
   bracket: ActiveBracket;
+  participantLogos: ParticipantLogoMap;
   liveMatchId: string | null;
   isTournamentOwner: boolean;
   updatingLiveMatch: boolean;
@@ -72,6 +76,92 @@ const KICK_RESERVED_PATHS = new Set([
   "settings",
   "videos",
 ]);
+
+
+function normalizeParticipantKey(
+  name: string
+): string {
+  return name
+    .trim()
+    .toLocaleLowerCase("es");
+}
+
+function getParticipantLogo(
+  team: BracketMatch["team1"],
+  participantLogos: ParticipantLogoMap
+): string | null {
+  if (!team) {
+    return null;
+  }
+
+  return (
+    participantLogos[
+      normalizeParticipantKey(
+        team.name
+      )
+    ] ?? null
+  );
+}
+
+function StreamParticipantAvatar({
+  team,
+  participantLogos,
+  size = "small",
+}: {
+  team: BracketMatch["team1"];
+  participantLogos: ParticipantLogoMap;
+  size?: "small" | "medium";
+}) {
+  const logoUrl =
+    getParticipantLogo(
+      team,
+      participantLogos
+    );
+
+  const [
+    failedLogoUrl,
+    setFailedLogoUrl,
+  ] = useState<string | null>(
+    null
+  );
+
+  if (
+    !team ||
+    !logoUrl ||
+    failedLogoUrl === logoUrl
+  ) {
+    return (
+      <TeamAvatar
+        team={team}
+        size={size}
+      />
+    );
+  }
+
+  const sizeClass =
+    size === "medium"
+      ? "h-12 w-12"
+      : "h-8 w-8";
+
+  return (
+    <div
+      title={team.name}
+      className={`${sizeClass} relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/25 bg-[#111923]`}
+    >
+      <img
+        src={logoUrl}
+        alt={`Logo de ${team.name}`}
+        className="h-full w-full object-cover"
+        draggable={false}
+        onError={() => {
+          setFailedLogoUrl(
+            logoUrl
+          );
+        }}
+      />
+    </div>
+  );
+}
 
 function isDoubleBracket(
   bracket: ActiveBracket
@@ -303,6 +393,7 @@ export default function StreamTab({
   tournamentName,
   streamUrl,
   bracket,
+  participantLogos,
   liveMatchId,
   isTournamentOwner,
   updatingLiveMatch,
@@ -402,8 +493,11 @@ export default function StreamTab({
 
                 <div className="mt-6 space-y-3">
                   <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/25 px-4 py-3">
-                    <TeamAvatar
+                    <StreamParticipantAvatar
                       team={liveMatch.team1}
+                      participantLogos={
+                        participantLogos
+                      }
                       size="small"
                     />
 
@@ -418,8 +512,11 @@ export default function StreamTab({
                   </div>
 
                   <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/25 px-4 py-3">
-                    <TeamAvatar
+                    <StreamParticipantAvatar
                       team={liveMatch.team2}
+                      participantLogos={
+                        participantLogos
+                      }
                       size="small"
                     />
 
@@ -487,9 +584,37 @@ export default function StreamTab({
                         {getMatchLabel(match)}
                       </p>
 
-                      <p className="mt-2 truncate text-xs font-bold text-neutral-300">
-                        {match.team1?.name} vs {match.team2?.name}
-                      </p>
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <StreamParticipantAvatar
+                            team={match.team1}
+                            participantLogos={
+                              participantLogos
+                            }
+                            size="small"
+                          />
+
+                          <p className="min-w-0 flex-1 truncate text-xs font-bold text-neutral-300">
+                            {match.team1?.name ??
+                              "Por definir"}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <StreamParticipantAvatar
+                            team={match.team2}
+                            participantLogos={
+                              participantLogos
+                            }
+                            size="small"
+                          />
+
+                          <p className="min-w-0 flex-1 truncate text-xs font-bold text-neutral-300">
+                            {match.team2?.name ??
+                              "Por definir"}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   )
                 )

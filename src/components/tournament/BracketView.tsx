@@ -1422,6 +1422,9 @@ if (!cancelled) {
     tournamentName={tournament.name}
     streamUrl={tournament.stream}
     bracket={bracket}
+    participantLogos={
+      participantLogos
+    }
     liveMatchId={liveMatchId}
     isTournamentOwner={
       isTournamentOwner &&
