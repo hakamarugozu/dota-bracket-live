@@ -1219,6 +1219,9 @@ if (!cancelled) {
         <ResultModal
           match={dialog.match}
           winner={dialog.winner}
+          participantLogos={
+            participantLogos
+          }
           winnerScore={winnerScore}
           loserScore={loserScore}
           onWinnerScoreChange={

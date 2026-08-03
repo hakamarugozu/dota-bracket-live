@@ -1,33 +1,30 @@
-import DialogTeam from "@/components/tournament/DialogTeam";
-import { BracketMatch, BracketTeam } from "@/lib/bracket";
+"use client";
+
+import { useState } from "react";
+
+import TeamAvatar from "@/components/tournament/TeamAvatar";
+
+import type {
+  BracketMatch,
+  BracketTeam,
+} from "@/lib/bracket";
 
 const QUICK_RESULTS = [
-  [1,0],[2,0],[2,1],[3,0],[3,1],[3,2],
+  [1, 0],
+  [2, 0],
+  [2, 1],
+  [3, 0],
+  [3, 1],
+  [3, 2],
 ] as const;
+
+type ParticipantLogoMap =
+  Record<string, string>;
 
 type Props = {
   match: BracketMatch;
   winner: BracketTeam;
-  winnerScore: number;
-  loserScore: number;
-  onWinnerScoreChange:(value:number)=>void;
-  onLoserScoreChange:(value:number)=>void;
-  onCancel:()=>void;
-  onConfirm:()=>void;
-};
-
-export default function ResultModal({
-  match,
-  winner,
-  winnerScore,
-  loserScore,
-  onWinnerScoreChange,
-  onLoserScoreChange,
-  onCancel,
-  onConfirm,
-}: {
-  match: BracketMatch;
-  winner: BracketTeam;
+  participantLogos?: ParticipantLogoMap;
   winnerScore: number;
   loserScore: number;
   onWinnerScoreChange: (
@@ -38,7 +35,27 @@ export default function ResultModal({
   ) => void;
   onCancel: () => void;
   onConfirm: () => void;
-}) {
+};
+
+function normalizeParticipantKey(
+  name: string
+): string {
+  return name
+    .trim()
+    .toLocaleLowerCase("es");
+}
+
+export default function ResultModal({
+  match,
+  winner,
+  participantLogos = {},
+  winnerScore,
+  loserScore,
+  onWinnerScoreChange,
+  onLoserScoreChange,
+  onCancel,
+  onConfirm,
+}: Props) {
   const loser =
     match.team1?.id === winner.id
       ? match.team2
@@ -86,6 +103,9 @@ export default function ResultModal({
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl border border-white/10 bg-black/25 p-4">
             <DialogTeam
               team={winner}
+              participantLogos={
+                participantLogos
+              }
               winner
             />
 
@@ -93,7 +113,12 @@ export default function ResultModal({
               VS
             </span>
 
-            <DialogTeam team={loser} />
+            <DialogTeam
+              team={loser}
+              participantLogos={
+                participantLogos
+              }
+            />
           </div>
 
           <p className="mt-5 text-[10px] font-black tracking-[0.16em] text-gray-500">
@@ -196,6 +221,105 @@ export default function ResultModal({
   );
 }
 
+function DialogTeam({
+  team,
+  participantLogos,
+  winner = false,
+}: {
+  team: BracketTeam | null;
+  participantLogos: ParticipantLogoMap;
+  winner?: boolean;
+}) {
+  return (
+    <div className="min-w-0 text-center">
+      <div className="flex justify-center">
+        <ParticipantAvatar
+          team={team}
+          participantLogos={
+            participantLogos
+          }
+          winner={winner}
+        />
+      </div>
+
+      <p
+        className={`mt-2 truncate text-xs font-black ${
+          winner
+            ? "text-white"
+            : "text-gray-400"
+        }`}
+      >
+        {team?.name ||
+          "Rival pendiente"}
+      </p>
+
+      {winner && (
+        <p className="mt-1 text-[8px] font-black tracking-wide text-red-400">
+          GANADOR
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ParticipantAvatar({
+  team,
+  participantLogos,
+  winner,
+}: {
+  team: BracketTeam | null;
+  participantLogos: ParticipantLogoMap;
+  winner: boolean;
+}) {
+  const [failedLogoUrl, setFailedLogoUrl] =
+    useState<string | null>(null);
+
+  const logoUrl = team
+    ? participantLogos[
+        normalizeParticipantKey(
+          team.name
+        )
+      ] ?? ""
+    : "";
+
+  if (
+    !team ||
+    !logoUrl ||
+    failedLogoUrl === logoUrl
+  ) {
+    return (
+      <TeamAvatar
+        team={team}
+        winner={winner}
+        size="medium"
+      />
+    );
+  }
+
+  return (
+    <div
+      title={team.name}
+      className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-[#111923] transition-all duration-300 hover:scale-110 ${
+        winner
+          ? "border-yellow-300/80 ring-2 ring-yellow-500/20"
+          : "border-white/25"
+      }`}
+    >
+      <img
+        src={logoUrl}
+        alt={`Logo de ${team.name}`}
+        className="h-full w-full object-cover"
+        draggable={false}
+        onError={() => {
+          setFailedLogoUrl(
+            logoUrl
+          );
+        }}
+      />
+    </div>
+  );
+}
+
 function ScoreInput({
   label,
   value,
@@ -246,5 +370,5 @@ function ScoreInput({
         }`}
       />
     </label>
-      );
+  );
 }
