@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 
-import ChampionCard from "@/components/tournament/ChampionCard";
 import TeamAvatar from "@/components/tournament/TeamAvatar";
 
 import type {
@@ -44,6 +43,9 @@ type ActiveBracket =
 type ActiveMatch =
   | BracketMatch
   | DoubleBracketMatch;
+
+type ParticipantLogoMap =
+  Record<string, string>;
 
 type MatchPosition = {
   x: number;
@@ -104,6 +106,8 @@ type BracketLayout = {
 type Props = {
   bracket: ActiveBracket;
 
+  participantLogos?: ParticipantLogoMap;
+
   onSelectWinner: (
     match: ActiveMatch,
     winnerId: string
@@ -123,6 +127,31 @@ type Props = {
     match: ActiveMatch
   ) => void;
 };
+
+function normalizeParticipantKey(
+  name: string
+): string {
+  return name
+    .trim()
+    .toLocaleLowerCase("es");
+}
+
+function getParticipantLogo(
+  team: BracketTeam | null,
+  participantLogos: ParticipantLogoMap
+): string | null {
+  if (!team) {
+    return null;
+  }
+
+  return (
+    participantLogos[
+      normalizeParticipantKey(
+        team.name
+      )
+    ] ?? null
+  );
+}
 
 function isDoubleBracket(
   bracket: ActiveBracket
@@ -144,6 +173,7 @@ function isDoubleMatch(
 
 export default function BracketCanvas({
   bracket,
+  participantLogos = {},
   onSelectWinner,
   onResetWinner,
   liveMatchId = null,
@@ -346,6 +376,9 @@ export default function BracketCanvas({
               >
                 <MatchCard
                   match={match}
+                  participantLogos={
+                    participantLogos
+                  }
                   onSelectWinner={
                     onSelectWinner
                   }
@@ -385,10 +418,16 @@ export default function BracketCanvas({
           ) ? (
             <DoubleChampionCard
               bracket={bracket}
+              participantLogos={
+                participantLogos
+              }
             />
           ) : (
-            <ChampionCard
+            <SingleChampionCard
               bracket={bracket}
+              participantLogos={
+                participantLogos
+              }
             />
           )}
         </div>
@@ -1635,8 +1674,80 @@ function getConnectionColor(
   return "rgba(239,68,68,0.95)";
 }
 
+function ParticipantAvatar({
+  team,
+  winner = false,
+  size = "medium",
+  participantLogos,
+}: {
+  team: BracketTeam | null;
+  winner?: boolean;
+  size?: "small" | "medium" | "large";
+  participantLogos: ParticipantLogoMap;
+}) {
+  const logoUrl =
+    getParticipantLogo(
+      team,
+      participantLogos
+    );
+
+  const [
+    failedLogoUrl,
+    setFailedLogoUrl,
+  ] = useState<string | null>(
+    null
+  );
+
+  if (
+    !team ||
+    !logoUrl ||
+    failedLogoUrl === logoUrl
+  ) {
+    return (
+      <TeamAvatar
+        team={team}
+        winner={winner}
+        size={size}
+      />
+    );
+  }
+
+  const sizeClasses = {
+    small:
+      "h-8 w-8",
+    medium:
+      "h-12 w-12",
+    large:
+      "h-20 w-20",
+  } as const;
+
+  return (
+    <div
+      title={team.name}
+      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border bg-[#111923] transition-all duration-300 hover:scale-110 ${sizeClasses[size]} ${
+        winner
+          ? "border-yellow-300/80 ring-2 ring-yellow-500/20"
+          : "border-white/25"
+      }`}
+    >
+      <img
+        src={logoUrl}
+        alt={`Logo de ${team.name}`}
+        className="h-full w-full object-cover"
+        draggable={false}
+        onError={() => {
+          setFailedLogoUrl(
+            logoUrl
+          );
+        }}
+      />
+    </div>
+  );
+}
+
 function MatchCard({
   match,
+  participantLogos,
   onSelectWinner,
   onResetWinner,
   liveMatchId,
@@ -1645,6 +1756,8 @@ function MatchCard({
   onToggleLiveMatch,
 }: {
   match: ActiveMatch;
+
+  participantLogos: ParticipantLogoMap;
 
   onSelectWinner: (
     match: ActiveMatch,
@@ -1774,6 +1887,9 @@ function MatchCard({
       <TeamRow
         match={match}
         team={match.team1}
+        participantLogos={
+          participantLogos
+        }
         score={match.score1}
         winner={
           match.winnerId ===
@@ -1789,6 +1905,9 @@ function MatchCard({
       <TeamRow
         match={match}
         team={match.team2}
+        participantLogos={
+          participantLogos
+        }
         score={match.score2}
         winner={
           match.winnerId ===
@@ -1831,6 +1950,7 @@ function MatchCard({
 function TeamRow({
   match,
   team,
+  participantLogos,
   score,
   winner,
   onSelectWinner,
@@ -1838,6 +1958,8 @@ function TeamRow({
   match: ActiveMatch;
 
   team: BracketTeam | null;
+
+  participantLogos: ParticipantLogoMap;
 
   score: number;
 
@@ -1876,10 +1998,13 @@ function TeamRow({
         }}
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
-        <TeamAvatar
+        <ParticipantAvatar
           team={team}
           winner={winner}
           size="small"
+          participantLogos={
+            participantLogos
+          }
         />
 
         <div className="min-w-0 flex-1">
@@ -1969,10 +2094,73 @@ function MatchStatus({
   );
 }
 
+function SingleChampionCard({
+  bracket,
+  participantLogos,
+}: {
+  bracket: TournamentBracket;
+  participantLogos: ParticipantLogoMap;
+}) {
+  const champion =
+    bracket.champion;
+
+  return (
+    <article
+      className={`overflow-hidden rounded-2xl border shadow-[0_18px_50px_rgba(0,0,0,0.5)] ${
+        champion
+          ? "border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 via-[#101822] to-[#080d13]"
+          : "border-white/15 bg-[#0a1017]"
+      }`}
+    >
+      <div className="border-b border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-center">
+        <p className="text-[10px] font-black tracking-[0.22em] text-yellow-500">
+          CAMPEÓN
+        </p>
+      </div>
+
+      <div className="flex min-h-[150px] flex-col items-center justify-center px-5 py-6 text-center">
+        {champion ? (
+          <ParticipantAvatar
+            team={champion}
+            winner
+            size="large"
+            participantLogos={
+              participantLogos
+            }
+          />
+        ) : (
+          <div className="text-4xl">
+            🏆
+          </div>
+        )}
+
+        <h3
+          className={`mt-4 max-w-full truncate text-lg font-black ${
+            champion
+              ? "text-yellow-200"
+              : "text-gray-400"
+          }`}
+        >
+          {champion?.name ??
+            "Aún no definido"}
+        </h3>
+
+        <p className="mt-2 text-[9px] font-black tracking-[0.16em] text-gray-500">
+          {champion
+            ? "GANADOR DEL TORNEO"
+            : "ESPERANDO LA FINAL"}
+        </p>
+      </div>
+    </article>
+  );
+}
+
 function DoubleChampionCard({
   bracket,
+  participantLogos,
 }: {
   bracket: DoubleTournamentBracket;
+  participantLogos: ParticipantLogoMap;
 }) {
   const champion =
     bracket.champion;
@@ -1986,10 +2174,13 @@ function DoubleChampionCard({
       </div>
 
       <div className="flex min-h-[150px] flex-col items-center justify-center px-5 py-6 text-center">
-        <TeamAvatar
+        <ParticipantAvatar
           team={champion}
           winner={Boolean(champion)}
           size="large"
+          participantLogos={
+            participantLogos
+          }
         />
 
         <h3

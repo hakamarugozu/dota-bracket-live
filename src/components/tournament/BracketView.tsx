@@ -89,6 +89,9 @@ type ActiveMatch =
   | BracketMatch
   | DoubleBracketMatch;
 
+type ParticipantLogoMap =
+  Record<string, string>;
+
 type ResultDialog =
   | {
       match: ActiveMatch;
@@ -99,6 +102,14 @@ type ResultDialog =
 type Props = {
   tournamentId: string;
 };
+
+function normalizeParticipantKey(
+  name: string
+): string {
+  return name
+    .trim()
+    .toLocaleLowerCase("es");
+}
 
 /**
  * Normaliza los diferentes valores que pueden
@@ -201,6 +212,11 @@ export default function BracketView({
     useState<ActiveBracket | null>(
       null
     );
+
+  const [
+    participantLogos,
+    setParticipantLogos,
+  ] = useState<ParticipantLogoMap>({});
 
   const [loading, setLoading] =
     useState(true);
@@ -311,6 +327,33 @@ if (!cancelled) {
             tournamentId
           );
 
+        const loadedParticipantLogos =
+          dbTeams.reduce<ParticipantLogoMap>(
+            (logoMap, team) => {
+              const participantName =
+                normalizeParticipantKey(
+                  team.name
+                );
+
+              const logoUrl =
+                String(
+                  team.logo ?? ""
+                ).trim();
+
+              if (
+                participantName &&
+                logoUrl
+              ) {
+                logoMap[
+                  participantName
+                ] = logoUrl;
+              }
+
+              return logoMap;
+            },
+            {}
+          );
+
         /**
          * getTournament puede devolver campos
          * adicionales a Tournament, como format.
@@ -358,6 +401,10 @@ if (!cancelled) {
 
         setTournament(
           tournamentWithTeams
+        );
+
+        setParticipantLogos(
+          loadedParticipantLogos
         );
 
         setLiveMatchId(
@@ -1271,6 +1318,9 @@ if (!cancelled) {
 
  <BracketCanvas
   bracket={bracket}
+  participantLogos={
+    participantLogos
+  }
   onSelectWinner={handleSelectWinner}
   onResetWinner={(matchId) => {
     void handleCorrectResult(matchId);
