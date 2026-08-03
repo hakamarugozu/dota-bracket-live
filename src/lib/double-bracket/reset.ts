@@ -23,6 +23,33 @@ function cloneDoubleBracket(
 }
 
 /**
+ * Devuelve todos los partidos del bracket.
+ */
+function getAllDoubleMatches(
+  bracket: DoubleTournamentBracket
+): DoubleBracketMatch[] {
+  const matches: DoubleBracketMatch[] = [];
+
+  for (const round of bracket.winnerRounds) {
+    matches.push(...round.matches);
+  }
+
+  for (const round of bracket.loserRounds) {
+    matches.push(...round.matches);
+  }
+
+  if (bracket.grandFinal) {
+    matches.push(bracket.grandFinal);
+  }
+
+  if (bracket.resetFinal) {
+    matches.push(bracket.resetFinal);
+  }
+
+  return matches;
+}
+
+/**
  * Devuelve el equipo que ocupa una posición
  * determinada dentro de un partido.
  */
@@ -33,6 +60,40 @@ function getTeamAtPosition(
   return position === 1
     ? match.team1
     : match.team2;
+}
+
+/**
+ * Coloca o elimina un equipo en una posición
+ * determinada dentro de un partido.
+ */
+function setTeamAtPosition(
+  match: DoubleBracketMatch,
+  position: MatchPosition,
+  team: BracketTeam | null
+): void {
+  if (position === 1) {
+    match.team1 = team;
+  } else {
+    match.team2 = team;
+  }
+}
+
+/**
+ * Compara dos participantes utilizando su ID.
+ */
+function teamsAreEqual(
+  firstTeam: BracketTeam | null,
+  secondTeam: BracketTeam | null
+): boolean {
+  if (!firstTeam && !secondTeam) {
+    return true;
+  }
+
+  if (!firstTeam || !secondTeam) {
+    return false;
+  }
+
+  return firstTeam.id === secondTeam.id;
 }
 
 /**
@@ -59,11 +120,11 @@ function removeExpectedTeam(
     return;
   }
 
-  if (position === 1) {
-    match.team1 = null;
-  } else {
-    match.team2 = null;
-  }
+  setTeamAtPosition(
+    match,
+    position,
+    null
+  );
 }
 
 /**
@@ -135,8 +196,12 @@ function clearChampion(
  * y todos los resultados que dependan de él.
  *
  * Importante:
- * conserva los participantes provenientes
- * de ramas que no fueron modificadas.
+ * conserva temporalmente los participantes
+ * provenientes de ramas que no fueron modificadas.
+ *
+ * Después, la reconciliación general comprueba
+ * si cada participante todavía tiene una ruta
+ * válida que justifique su presencia.
  */
 function clearFutureDoubleMatch(
   bracket: DoubleTournamentBracket,
@@ -170,12 +235,6 @@ function clearFutureDoubleMatch(
     visitedMatchIds
   );
 
-  /**
-   * Solo se limpia el resultado.
-   *
-   * No se borran team1 y team2 porque uno de ellos
-   * puede venir de otra rama que sigue siendo válida.
-   */
   resetDoubleMatchState(match);
 }
 
@@ -280,6 +339,254 @@ function clearOutgoingDependencies(
   }
 }
 
+type IncomingRoute = {
+  sourceMatch: DoubleBracketMatch;
+  route: "winner" | "loser";
+};
+
+/**
+ * Busca qué partido debe alimentar una posición
+ * determinada de un partido futuro.
+ */
+function findIncomingRoute(
+  allMatches: DoubleBracketMatch[],
+  targetMatchId: string,
+  targetPosition: MatchPosition
+): IncomingRoute | null {
+  for (const sourceMatch of allMatches) {
+    if (
+      sourceMatch.nextMatchId ===
+        targetMatchId &&
+      sourceMatch.nextMatchPosition ===
+        targetPosition
+    ) {
+      return {
+        sourceMatch,
+        route: "winner",
+      };
+    }
+
+    if (
+      sourceMatch.loserNextMatchId ===
+        targetMatchId &&
+      sourceMatch.loserNextMatchPosition ===
+        targetPosition
+    ) {
+      return {
+        sourceMatch,
+        route: "loser",
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Calcula qué participante debería ocupar
+ * una posición según el estado real de su
+ * partido de origen.
+ *
+ * Un partido pendiente no puede alimentar
+ * todavía ningún partido posterior.
+ */
+function getExpectedIncomingTeam(
+  incomingRoute: IncomingRoute
+): BracketTeam | null {
+  const sourceMatch =
+    incomingRoute.sourceMatch;
+
+  if (!sourceMatch.completed) {
+    return null;
+  }
+
+  const {
+    winner,
+    loser,
+  } = getOutgoingTeams(
+    sourceMatch
+  );
+
+  return incomingRoute.route === "winner"
+    ? winner
+    : loser;
+}
+
+/**
+ * Invalida el resultado de un partido cuando
+ * cambió alguno de sus participantes.
+ *
+ * También limpia los resultados posteriores
+ * que dependían de él.
+ */
+function invalidateChangedMatch(
+  bracket: DoubleTournamentBracket,
+  match: DoubleBracketMatch
+): void {
+  const visitedMatchIds =
+    new Set<string>();
+
+  clearOutgoingDependencies(
+    bracket,
+    match,
+    visitedMatchIds
+  );
+
+  resetDoubleMatchState(match);
+}
+
+/**
+ * Revisa todas las conexiones del bracket y elimina
+ * participantes huérfanos.
+ *
+ * Un participante es huérfano cuando aparece en un
+ * partido futuro, pero el partido que debía enviarlo:
+ *
+ * - todavía está pendiente;
+ * - fue corregido;
+ * - cambió de ganador o perdedor;
+ * - ya no contiene a ese participante.
+ *
+ * También restaura automáticamente un participante
+ * válido cuando la posición estaba vacía.
+ */
+function reconcileDoubleBracketInPlace(
+  bracket: DoubleTournamentBracket
+): boolean {
+  const allMatches =
+    getAllDoubleMatches(bracket);
+
+  const maximumPasses =
+    Math.max(
+      1,
+      allMatches.length * 3
+    );
+
+  let bracketChanged = false;
+
+  for (
+    let pass = 0;
+    pass < maximumPasses;
+    pass += 1
+  ) {
+    let passChanged = false;
+
+    for (const targetMatch of allMatches) {
+      /**
+       * La primera ronda del Winner Bracket
+       * recibe sus participantes directamente
+       * desde la lista oficial del torneo.
+       *
+       * Como no tiene rutas entrantes, sus
+       * posiciones no se modifican aquí.
+       */
+      let targetWasInvalidated = false;
+
+      const positions:
+        MatchPosition[] = [
+          1,
+          2,
+        ];
+
+      for (const position of positions) {
+        const incomingRoute =
+          findIncomingRoute(
+            allMatches,
+            targetMatch.id,
+            position
+          );
+
+        if (!incomingRoute) {
+          continue;
+        }
+
+        const expectedTeam =
+          getExpectedIncomingTeam(
+            incomingRoute
+          );
+
+        const currentTeam =
+          getTeamAtPosition(
+            targetMatch,
+            position
+          );
+
+        if (
+          teamsAreEqual(
+            currentTeam,
+            expectedTeam
+          )
+        ) {
+          continue;
+        }
+
+        /**
+         * Antes de cambiar participantes, se
+         * invalida una sola vez el resultado
+         * del partido y toda su ruta posterior.
+         */
+        if (!targetWasInvalidated) {
+          invalidateChangedMatch(
+            bracket,
+            targetMatch
+          );
+
+          targetWasInvalidated = true;
+        }
+
+        setTeamAtPosition(
+          targetMatch,
+          position,
+          expectedTeam
+        );
+
+        passChanged = true;
+        bracketChanged = true;
+      }
+    }
+
+    if (!passChanged) {
+      break;
+    }
+  }
+
+  if (bracketChanged) {
+    clearResetFinal(bracket);
+    clearChampion(bracket);
+  }
+
+  return bracketChanged;
+}
+
+/**
+ * Repara de manera segura cualquier inconsistencia
+ * de participantes en las rondas futuras.
+ *
+ * Esta función puede utilizarse al cargar un bracket
+ * guardado desde Supabase para limpiar estados antiguos
+ * sin reordenar los participantes de la primera ronda.
+ */
+export function repairDoubleBracketConsistency(
+  currentBracket: DoubleTournamentBracket
+): DoubleTournamentBracket {
+  const bracket =
+    cloneDoubleBracket(
+      currentBracket
+    );
+
+  const changed =
+    reconcileDoubleBracketInPlace(
+      bracket
+    );
+
+  if (changed) {
+    bracket.updatedAt =
+      new Date().toISOString();
+  }
+
+  return bracket;
+}
+
 /**
  * Reinicia un resultado y limpia únicamente
  * los partidos posteriores que dependían de él.
@@ -291,8 +598,13 @@ export function resetDoubleMatchWinner(
   currentBracket: DoubleTournamentBracket,
   matchId: string
 ): DoubleTournamentBracket {
+  /**
+   * Primero eliminamos cualquier participante
+   * huérfano que pudiera existir por una edición
+   * o corrección antigua.
+   */
   const bracket =
-    cloneDoubleBracket(
+    repairDoubleBracketConsistency(
       currentBracket
     );
 
@@ -347,6 +659,16 @@ export function resetDoubleMatchWinner(
     currentMatch
   );
 
+  /**
+   * Esta segunda reconciliación elimina cualquier
+   * participante huérfano que haya quedado en una
+   * ruta posterior todavía pendiente.
+   */
+  reconcileDoubleBracketInPlace(
+    bracket
+  );
+
+  clearResetFinal(bracket);
   clearChampion(bracket);
 
   bracket.updatedAt =

@@ -46,6 +46,10 @@ import type {
   DoubleTournamentBracket,
 } from "@/lib/double-bracket";
 
+import {
+  repairDoubleBracketConsistency,
+} from "@/lib/double-bracket/reset";
+
 import ResultModal from "@/components/tournament/ResultModal";
 import BracketCanvas from "@/components/tournament/BracketCanvas";
 import TeamsTab from "@/components/tournament/TeamsTab";
@@ -418,6 +422,62 @@ if (!cancelled) {
           savedFormat === expectedFormat;
 
         if (savedBracketIsValid) {
+          /**
+           * Antes de mostrar una llave de doble eliminación
+           * guardada, comprobamos que cada participante de
+           * rondas futuras todavía tenga una ruta válida.
+           *
+           * Esto elimina equipos huérfanos que pudieron quedar
+           * después de corregir resultados, editar participantes
+           * o rehacer parcialmente el fixture.
+           */
+          if (isDoubleBracket(savedBracket)) {
+            const repairedBracket =
+              repairDoubleBracketConsistency(
+                savedBracket
+              );
+
+            const bracketWasRepaired =
+              repairedBracket.updatedAt !==
+              savedBracket.updatedAt;
+
+            if (bracketWasRepaired) {
+              /**
+               * La reparación se guarda en Supabase para que
+               * todos los administradores reciban el mismo
+               * fixture consistente.
+               *
+               * Si el guardado falla por permisos o conexión,
+               * la interfaz igualmente utiliza la versión
+               * reparada durante esta sesión.
+               */
+              try {
+                await saveBracketToSupabase(
+                  tournamentId,
+                  repairedBracket as unknown as
+                    TournamentBracket
+                );
+              } catch (repairSaveError) {
+                if (!cancelled) {
+                  setMessage(
+                    getErrorMessage(
+                      repairSaveError,
+                      "El fixture fue reparado localmente, pero no se pudo guardar la reparación."
+                    )
+                  );
+                }
+              }
+            }
+
+            if (!cancelled) {
+              setBracket(
+                repairedBracket
+              );
+            }
+
+            return;
+          }
+
           setBracket(savedBracket);
           return;
         }
@@ -1228,57 +1288,40 @@ if (!cancelled) {
             </section>
 
             <aside className="space-y-5">
-<aside className="space-y-5">
-<ChampionPanel
-  bracket={bracket}
-/>
+              <ChampionPanel
+                bracket={bracket}
+              />
 
-  <ProgressPanel
-    bracket={bracket}
-  />
+              <ProgressPanel
+                bracket={bracket}
+              />
 
-<InformationPanel
-  tournament={tournament}
-  bracket={bracket}
-/>
-<InstructionsPanel />
-
-{isTournamentOwner && (
-  <div className="space-y-3">
-    <Link
-      href={`/tournaments/${tournamentId}/edit`}
-      className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-3.5 text-center text-sm font-black text-blue-300 transition hover:border-blue-400/50 hover:bg-blue-500/20 hover:text-blue-200"
-    >
-      <span>✏️</span>
-      EDITAR INFORMACIÓN DEL TORNEO
-    </Link>
-
-    <Link
-      href={`/tournaments/${tournamentId}/teams`}
-      className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-3.5 text-center text-sm font-black text-amber-300 transition hover:border-amber-400/50 hover:bg-amber-500/20 hover:text-amber-200"
-    >
-      <span>🛡️</span>
-      EDITAR EQUIPOS Y LOGOS
-    </Link>
-  </div>
-)}
-
-<Link
-  href="/create"
-  className="flex w-full items-center justify-center rounded-xl bg-red-600 px-5 py-3.5 text-sm font-black transition hover:bg-red-700"
->
-  + CREAR OTRO TORNEO
-</Link>
-</aside>
               <InformationPanel
                 tournament={tournament}
-                bracket={
-                  bracket as unknown as
-                    TournamentBracket
-                }
+                bracket={bracket}
               />
 
               <InstructionsPanel />
+
+              {isTournamentOwner && (
+                <div className="space-y-3">
+                  <Link
+                    href={`/tournaments/${tournamentId}/edit`}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-3.5 text-center text-sm font-black text-blue-300 transition hover:border-blue-400/50 hover:bg-blue-500/20 hover:text-blue-200"
+                  >
+                    <span>✏️</span>
+                    EDITAR INFORMACIÓN DEL TORNEO
+                  </Link>
+
+                  <Link
+                    href={`/tournaments/${tournamentId}/teams`}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-3.5 text-center text-sm font-black text-amber-300 transition hover:border-amber-400/50 hover:bg-amber-500/20 hover:text-amber-200"
+                  >
+                    <span>🛡️</span>
+                    EDITAR EQUIPOS Y LOGOS
+                  </Link>
+                </div>
+              )}
 
               <Link
                 href="/create"
