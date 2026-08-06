@@ -79,6 +79,7 @@ type TournamentWithFormat =
     stream: string | null;
     status: string | null;
     mode: "team" | "individual" | null;
+    organization: string | null;
   };
 
 type ActiveBracket =
@@ -365,6 +366,7 @@ if (!cancelled) {
             live_match_id?: string | null;
             status?: string | null;
             mode?: "team" | "individual" | null;
+            organization?: string | null;
           };
 
         const tournamentWithTeams:
@@ -392,6 +394,10 @@ if (!cancelled) {
 
             mode:
               parsedWithFormat.mode ??
+              null,
+
+            organization:
+              parsedWithFormat.organization ??
               null,
           };
 
