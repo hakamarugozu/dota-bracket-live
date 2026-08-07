@@ -11,6 +11,8 @@ import {
 } from "react";
 import { useParams, useRouter } from "next/navigation";
 
+import LogoutButton from "@/components/LogoutButton";
+
 import { supabase } from "@/lib/supabase";
 import { ORGANIZATIONS } from "@/lib/organizations";
 import {
@@ -568,12 +570,12 @@ export default function EditTournamentPage() {
           >
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/40 bg-red-600/10 shadow-[0_0_25px_rgba(220,38,38,0.15)]">
               <span className="text-xl font-black text-red-500">
-                D
+                E
               </span>
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
-                Dota Bracket
+                Esports Bracket
               </p>
               <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.28em] text-red-500">
                 Live
@@ -581,12 +583,16 @@ export default function EditTournamentPage() {
             </div>
           </Link>
 
-          <Link
-            href={`/tournaments/${tournament.id}/bracket`}
-            className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
-          >
-            ← Volver al fixture
-          </Link>
+          <div className="flex items-center gap-2">
+  <Link
+    href={`/tournaments/${tournament.id}/bracket`}
+    className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
+  >
+    ← Volver al fixture
+  </Link>
+
+  <LogoutButton />
+</div>
         </div>
       </header>
 

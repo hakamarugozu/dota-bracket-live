@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import LogoutButton from "@/components/LogoutButton";
 import {
   useCallback,
   useEffect,
@@ -263,13 +264,13 @@ export default function TournamentRulesPage() {
           >
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/40 bg-red-600/10">
               <span className="text-xl font-black text-red-500">
-                D
+                E
               </span>
             </div>
 
             <div className="min-w-0">
               <p className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
-                Dota Bracket
+                Esports Bracket
               </p>
 
               <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.28em] text-red-500">
@@ -278,12 +279,16 @@ export default function TournamentRulesPage() {
             </div>
           </Link>
 
-          <Link
-            href={`/tournaments/${tournament.id}`}
-            className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
-          >
-            ← Centro del Torneo
-          </Link>
+<div className="flex items-center gap-2">
+  <Link
+    href={`/tournaments/${tournament.id}`}
+    className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
+  >
+    ← Centro del Torneo
+  </Link>
+
+  <LogoutButton />
+</div>
         </div>
       </header>
 

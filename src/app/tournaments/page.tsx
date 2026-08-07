@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import LogoutButton from "@/components/LogoutButton";
 
 import {
   deleteTournament,
@@ -75,13 +76,17 @@ export default function MyTournamentsPage() {
             </p>
           </div>
 
-          <Link
-            href="/dashboard"
-            className="inline-flex w-fit items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-semibold text-neutral-300 transition hover:border-red-500/40 hover:bg-red-600/10 hover:text-white"
-          >
-            <span>←</span>
-            Volver al Dashboard
-          </Link>
+          <div className="flex items-center gap-2">
+  <Link
+    href="/dashboard"
+    className="inline-flex w-fit items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-semibold text-neutral-300 transition hover:border-red-500/40 hover:bg-red-600/10 hover:text-white"
+  >
+    <span>←</span>
+    Volver al Dashboard
+  </Link>
+
+  <LogoutButton />
+</div>
         </div>
 
         {loading ? (
