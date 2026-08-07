@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import {
+  Geist,
+  Geist_Mono,
+} from "next/font/google";
+
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,7 +48,6 @@ export const metadata: Metadata = {
 
   creator: "Esports Bracket Live",
   publisher: "Esports Bracket Live",
-
   category: "Esports",
 
   robots: {
@@ -63,9 +66,7 @@ export default function RootLayout({
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">
-        {children}
-      </body>
+<body>{children}</body>
     </html>
   );
 }

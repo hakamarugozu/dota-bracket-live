@@ -128,8 +128,7 @@ export default function DashboardLayout({
       return;
     }
 
-    router.replace("/login");
-    router.refresh();
+window.location.replace("/login");
   }
 
   function closeMobileMenu() {
