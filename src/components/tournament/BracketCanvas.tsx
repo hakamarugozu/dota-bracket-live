@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  DragEvent as ReactDragEvent,
   PointerEvent as ReactPointerEvent,
   useMemo,
   useRef,
@@ -103,6 +104,12 @@ type BracketLayout = {
   height: number;
 };
 
+type DraggedParticipant = {
+  teamId: string;
+  matchId: string;
+  position: 1 | 2;
+};
+
 type Props = {
   bracket: ActiveBracket;
 
@@ -115,6 +122,13 @@ type Props = {
 
   onResetWinner: (
     matchId: string
+  ) => void;
+
+  canReorderParticipants?: boolean;
+
+  onSwapInitialParticipants?: (
+    sourceTeamId: string,
+    targetTeamId: string
   ) => void;
 
   liveMatchId?: string | null;
@@ -176,6 +190,8 @@ export default function BracketCanvas({
   participantLogos = {},
   onSelectWinner,
   onResetWinner,
+  canReorderParticipants = false,
+  onSwapInitialParticipants = () => undefined,
   liveMatchId = null,
   canManageLiveMatch = false,
   updatingLiveMatch = false,
@@ -195,6 +211,18 @@ export default function BracketCanvas({
   const [dragging, setDragging] =
     useState(false);
 
+  const [
+    draggedParticipantSlot,
+    setDraggedParticipantSlot,
+  ] = useState<DraggedParticipant | null>(
+    null
+  );
+
+  const [
+    hoveredParticipantSlot,
+    setHoveredParticipantSlot,
+  ] = useState<string | null>(null);
+
   const layout = useMemo(
     () =>
       isDoubleBracket(bracket)
@@ -204,6 +232,28 @@ export default function BracketCanvas({
         : createSingleBracketLayout(
             bracket
           ),
+    [bracket]
+  );
+
+  const initialParticipantIds = useMemo(
+    () => {
+      const firstRound =
+        isDoubleBracket(bracket)
+          ? bracket.winnerRounds[0]
+          : bracket.rounds[0];
+
+      return new Set(
+        (firstRound?.matches ?? [])
+          .flatMap((match) => [
+            match.team1?.id ?? null,
+            match.team2?.id ?? null,
+          ])
+          .filter(
+            (teamId): teamId is string =>
+              Boolean(teamId)
+          )
+      );
+    },
     [bracket]
   );
 
@@ -300,6 +350,109 @@ export default function BracketCanvas({
     }
   };
 
+
+  const getParticipantSlotKey = (
+    matchId: string,
+    position: 1 | 2
+  ) => `${matchId}:${position}`;
+
+  const handleParticipantDragStart = (
+    event: ReactDragEvent<HTMLButtonElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam
+  ) => {
+    if (!canReorderParticipants) {
+      event.preventDefault();
+      return;
+    }
+
+    const slot: DraggedParticipant = {
+      matchId: match.id,
+      position,
+      teamId: team.id,
+    };
+
+    setDraggedParticipantSlot(slot);
+    setHoveredParticipantSlot(null);
+
+    event.dataTransfer.effectAllowed =
+      "move";
+    event.dataTransfer.setData(
+      "text/plain",
+      getParticipantSlotKey(
+        match.id,
+        position
+      )
+    );
+  };
+
+  const handleParticipantDragOver = (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => {
+    if (
+      !canReorderParticipants ||
+      !draggedParticipantSlot ||
+      !team
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect =
+      "move";
+
+    setHoveredParticipantSlot(
+      getParticipantSlotKey(
+        match.id,
+        position
+      )
+    );
+  };
+
+  const handleParticipantDrop = (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => {
+    event.preventDefault();
+
+    const source =
+      draggedParticipantSlot;
+
+    setDraggedParticipantSlot(null);
+    setHoveredParticipantSlot(null);
+
+    if (
+      !canReorderParticipants ||
+      !source ||
+      !team
+    ) {
+      return;
+    }
+
+    if (
+      source.matchId === match.id &&
+      source.position === position
+    ) {
+      return;
+    }
+
+    onSwapInitialParticipants(
+      source.teamId,
+      team.id
+    );
+  };
+
+  const handleParticipantDragEnd = () => {
+    setDraggedParticipantSlot(null);
+    setHoveredParticipantSlot(null);
+  };
+
   return (
     <div
       ref={scrollRef}
@@ -387,6 +540,30 @@ export default function BracketCanvas({
                   }
                   onResetWinner={
                     onResetWinner
+                  }
+                  canReorderParticipants={
+                    canReorderParticipants
+                  }
+                  initialParticipantIds={
+                    initialParticipantIds
+                  }
+                  draggedParticipantSlot={
+                    draggedParticipantSlot
+                  }
+                  hoveredParticipantSlot={
+                    hoveredParticipantSlot
+                  }
+                  onParticipantDragStart={
+                    handleParticipantDragStart
+                  }
+                  onParticipantDragOver={
+                    handleParticipantDragOver
+                  }
+                  onParticipantDrop={
+                    handleParticipantDrop
+                  }
+                  onParticipantDragEnd={
+                    handleParticipantDragEnd
                   }
                   liveMatchId={
                     liveMatchId
@@ -1743,6 +1920,14 @@ function MatchCard({
   participantLogos,
   onSelectWinner,
   onResetWinner,
+  canReorderParticipants,
+  initialParticipantIds,
+  draggedParticipantSlot,
+  hoveredParticipantSlot,
+  onParticipantDragStart,
+  onParticipantDragOver,
+  onParticipantDrop,
+  onParticipantDragEnd,
   liveMatchId,
   canManageLiveMatch,
   updatingLiveMatch,
@@ -1760,6 +1945,39 @@ function MatchCard({
   onResetWinner: (
     matchId: string
   ) => void;
+
+  canReorderParticipants: boolean;
+
+  initialParticipantIds: Set<string>;
+
+  draggedParticipantSlot:
+    DraggedParticipant | null;
+
+  hoveredParticipantSlot:
+    string | null;
+
+  onParticipantDragStart: (
+    event: ReactDragEvent<HTMLButtonElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam
+  ) => void;
+
+  onParticipantDragOver: (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => void;
+
+  onParticipantDrop: (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => void;
+
+  onParticipantDragEnd: () => void;
 
   liveMatchId: string | null;
 
@@ -1779,6 +1997,24 @@ function MatchCard({
   const automaticAdvance =
     isDoubleMatch(match) &&
     match.automaticAdvance;
+
+  const canReorderTeam1 =
+    canReorderParticipants &&
+    Boolean(
+      match.team1 &&
+        initialParticipantIds.has(
+          match.team1.id
+        )
+    );
+
+  const canReorderTeam2 =
+    canReorderParticipants &&
+    Boolean(
+      match.team2 &&
+        initialParticipantIds.has(
+          match.team2.id
+        )
+    );
 
   const section =
     isDoubleMatch(match)
@@ -1891,6 +2127,28 @@ function MatchCard({
         onSelectWinner={
           onSelectWinner
         }
+        position={1}
+        canReorder={
+          canReorderTeam1
+        }
+        draggedParticipantSlot={
+          draggedParticipantSlot
+        }
+        hoveredParticipantSlot={
+          hoveredParticipantSlot
+        }
+        onParticipantDragStart={
+          onParticipantDragStart
+        }
+        onParticipantDragOver={
+          onParticipantDragOver
+        }
+        onParticipantDrop={
+          onParticipantDrop
+        }
+        onParticipantDragEnd={
+          onParticipantDragEnd
+        }
       />
 
       <div className="mx-3 h-px bg-white/10" />
@@ -1908,6 +2166,28 @@ function MatchCard({
         }
         onSelectWinner={
           onSelectWinner
+        }
+        position={2}
+        canReorder={
+          canReorderTeam2
+        }
+        draggedParticipantSlot={
+          draggedParticipantSlot
+        }
+        hoveredParticipantSlot={
+          hoveredParticipantSlot
+        }
+        onParticipantDragStart={
+          onParticipantDragStart
+        }
+        onParticipantDragOver={
+          onParticipantDragOver
+        }
+        onParticipantDrop={
+          onParticipantDrop
+        }
+        onParticipantDragEnd={
+          onParticipantDragEnd
         }
       />
 
@@ -1947,6 +2227,14 @@ function TeamRow({
   score,
   winner,
   onSelectWinner,
+  position,
+  canReorder,
+  draggedParticipantSlot,
+  hoveredParticipantSlot,
+  onParticipantDragStart,
+  onParticipantDragOver,
+  onParticipantDrop,
+  onParticipantDragEnd,
 }: {
   match: ActiveMatch;
 
@@ -1962,22 +2250,120 @@ function TeamRow({
     match: ActiveMatch,
     winnerId: string
   ) => void;
+
+  position: 1 | 2;
+
+  canReorder: boolean;
+
+  draggedParticipantSlot:
+    DraggedParticipant | null;
+
+  hoveredParticipantSlot:
+    string | null;
+
+  onParticipantDragStart: (
+    event: ReactDragEvent<HTMLButtonElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam
+  ) => void;
+
+  onParticipantDragOver: (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => void;
+
+  onParticipantDrop: (
+    event: ReactDragEvent<HTMLDivElement>,
+    match: ActiveMatch,
+    position: 1 | 2,
+    team: BracketTeam | null
+  ) => void;
+
+  onParticipantDragEnd: () => void;
 }) {
   const disabled =
     !team ||
     (isDoubleMatch(match) &&
       match.automaticAdvance);
 
+  const slotKey =
+    `${match.id}:${position}`;
+
+  const isDraggingThisParticipant =
+    Boolean(
+      draggedParticipantSlot &&
+        draggedParticipantSlot.matchId ===
+          match.id &&
+        draggedParticipantSlot.position ===
+          position
+    );
+
+  const isDropTarget =
+    canReorder &&
+    Boolean(team) &&
+    Boolean(draggedParticipantSlot) &&
+    !isDraggingThisParticipant &&
+    hoveredParticipantSlot ===
+      slotKey;
+
   return (
     <div
-      className={`flex h-[44px] items-center ${
-        winner
-          ? "bg-gradient-to-r from-red-500/15 to-transparent"
-          : disabled
-            ? "bg-white/[0.015]"
-            : ""
+      onDragOver={(event) =>
+        onParticipantDragOver(
+          event,
+          match,
+          position,
+          team
+        )
+      }
+      onDrop={(event) =>
+        onParticipantDrop(
+          event,
+          match,
+          position,
+          team
+        )
+      }
+      className={`flex h-[44px] items-center transition ${
+        isDropTarget
+          ? "bg-red-500/15 ring-1 ring-inset ring-red-400/70"
+          : isDraggingThisParticipant
+            ? "opacity-45"
+            : winner
+              ? "bg-gradient-to-r from-red-500/15 to-transparent"
+              : disabled
+                ? "bg-white/[0.015]"
+                : ""
       }`}
     >
+      {canReorder && team && (
+        <button
+          type="button"
+          draggable
+          onDragStart={(event) =>
+            onParticipantDragStart(
+              event,
+              match,
+              position,
+              team
+            )
+          }
+          onDragEnd={
+            onParticipantDragEnd
+          }
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          title="Arrastrar participante"
+          aria-label={`Mover ${team.name}`}
+          className="ml-1 flex h-8 w-5 shrink-0 cursor-grab items-center justify-center rounded text-[11px] font-black tracking-[-0.22em] text-gray-500 transition hover:bg-white/10 hover:text-gray-200 active:cursor-grabbing"
+        >
+          ⋮⋮
+        </button>
+      )}
       <button
         type="button"
         disabled={disabled}

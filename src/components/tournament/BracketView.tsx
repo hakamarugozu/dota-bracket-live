@@ -49,6 +49,9 @@ import type {
 import {
   repairDoubleBracketConsistency,
 } from "@/lib/double-bracket/reset";
+import {
+  propagateAutomaticByes,
+} from "@/lib/double-bracket/advance";
 
 import ResultModal from "@/components/tournament/ResultModal";
 import BracketCanvas from "@/components/tournament/BracketCanvas";
@@ -175,6 +178,414 @@ function isDoubleMatch(
     "section" in match &&
     "loserNextMatchId" in match
   );
+}
+
+
+type BracketWithPositionLock =
+  ActiveBracket & {
+    positionsLocked?: boolean;
+  };
+
+function bracketHasRealResult(
+  bracket: ActiveBracket
+): boolean {
+  const matches: ActiveMatch[] =
+    isDoubleBracket(bracket)
+      ? [
+          ...bracket.winnerRounds.flatMap(
+            (round) => round.matches
+          ),
+          ...bracket.loserRounds.flatMap(
+            (round) => round.matches
+          ),
+          ...(bracket.grandFinal
+            ? [bracket.grandFinal]
+            : []),
+          ...(bracket.resetFinal
+            ? [bracket.resetFinal]
+            : []),
+        ]
+      : bracket.rounds.flatMap(
+          (round) => round.matches
+        );
+
+  return matches.some((match) => {
+    if (
+      !match.completed ||
+      !match.team1 ||
+      !match.team2
+    ) {
+      return false;
+    }
+
+    if (
+      isDoubleMatch(match) &&
+      match.automaticAdvance
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function bracketPositionsAreLocked(
+  bracket: ActiveBracket
+): boolean {
+  return Boolean(
+    (bracket as BracketWithPositionLock)
+      .positionsLocked
+  );
+}
+
+function lockBracketPositions<T extends ActiveBracket>(
+  bracket: T
+): T {
+  return {
+    ...bracket,
+    positionsLocked: true,
+  } as T;
+}
+
+type InitialParticipantSlot = {
+  match: ActiveMatch;
+  position: 1 | 2;
+};
+
+function getInitialMatches(
+  bracket: ActiveBracket
+): ActiveMatch[] {
+  const firstRound =
+    isDoubleBracket(bracket)
+      ? bracket.winnerRounds[0]
+      : bracket.rounds[0];
+
+  return firstRound?.matches ?? [];
+}
+
+function getTeamAtSlot(
+  match: ActiveMatch,
+  position: 1 | 2
+): BracketTeam | null {
+  return position === 1
+    ? match.team1
+    : match.team2;
+}
+
+function setTeamAtSlot(
+  match: ActiveMatch,
+  position: 1 | 2,
+  team: BracketTeam | null
+): void {
+  if (position === 1) {
+    match.team1 = team;
+  } else {
+    match.team2 = team;
+  }
+}
+
+function findInitialParticipantSlot(
+  bracket: ActiveBracket,
+  teamId: string
+): InitialParticipantSlot | null {
+  for (const match of getInitialMatches(
+    bracket
+  )) {
+    if (match.team1?.id === teamId) {
+      return {
+        match,
+        position: 1,
+      };
+    }
+
+    if (match.team2?.id === teamId) {
+      return {
+        match,
+        position: 2,
+      };
+    }
+  }
+
+  return null;
+}
+
+function findActiveMatch(
+  bracket: ActiveBracket,
+  matchId: string
+): ActiveMatch | null {
+  if (isDoubleBracket(bracket)) {
+    for (const round of bracket.winnerRounds) {
+      const match = round.matches.find(
+        (currentMatch) =>
+          currentMatch.id === matchId
+      );
+
+      if (match) {
+        return match;
+      }
+    }
+
+    for (const round of bracket.loserRounds) {
+      const match = round.matches.find(
+        (currentMatch) =>
+          currentMatch.id === matchId
+      );
+
+      if (match) {
+        return match;
+      }
+    }
+
+    if (bracket.grandFinal?.id === matchId) {
+      return bracket.grandFinal;
+    }
+
+    if (bracket.resetFinal?.id === matchId) {
+      return bracket.resetFinal;
+    }
+
+    return null;
+  }
+
+  for (const round of bracket.rounds) {
+    const match = round.matches.find(
+      (currentMatch) =>
+        currentMatch.id === matchId
+    );
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function resetSingleMatchState(
+  match: BracketMatch,
+  clearParticipants: boolean
+): void {
+  if (clearParticipants) {
+    match.team1 = null;
+    match.team2 = null;
+  }
+
+  match.score1 = 0;
+  match.score2 = 0;
+  match.winnerId = null;
+  match.completed = false;
+}
+
+function resetDoubleMatchForReorder(
+  match: DoubleBracketMatch,
+  clearParticipants: boolean
+): void {
+  if (clearParticipants) {
+    match.team1 = null;
+    match.team2 = null;
+  }
+
+  match.score1 = 0;
+  match.score2 = 0;
+  match.winnerId = null;
+  match.loserId = null;
+  match.completed = false;
+  match.automaticAdvance = false;
+}
+
+function advanceInitialSingleByes(
+  bracket: TournamentBracket
+): void {
+  const firstRound = bracket.rounds[0];
+
+  if (!firstRound) {
+    return;
+  }
+
+  for (const match of firstRound.matches) {
+    const onlyTeam =
+      match.team1 && !match.team2
+        ? match.team1
+        : match.team2 && !match.team1
+          ? match.team2
+          : null;
+
+    if (!onlyTeam) {
+      continue;
+    }
+
+    match.score1 = 0;
+    match.score2 = 0;
+    match.winnerId = onlyTeam.id;
+    match.completed = true;
+
+    if (
+      !match.nextMatchId ||
+      !match.nextMatchPosition
+    ) {
+      bracket.champion = onlyTeam;
+      continue;
+    }
+
+    const nextMatch = findActiveMatch(
+      bracket,
+      match.nextMatchId
+    );
+
+    if (nextMatch) {
+      setTeamAtSlot(
+        nextMatch,
+        match.nextMatchPosition,
+        onlyTeam
+      );
+    }
+  }
+}
+
+function advanceInitialDoubleByes(
+  bracket: DoubleTournamentBracket
+): void {
+  const firstRound =
+    bracket.winnerRounds[0];
+
+  if (!firstRound) {
+    return;
+  }
+
+  for (const match of firstRound.matches) {
+    const onlyTeam =
+      match.team1 && !match.team2
+        ? match.team1
+        : match.team2 && !match.team1
+          ? match.team2
+          : null;
+
+    if (!onlyTeam) {
+      continue;
+    }
+
+    match.score1 = 0;
+    match.score2 = 0;
+    match.winnerId = onlyTeam.id;
+    match.loserId = null;
+    match.completed = true;
+    match.automaticAdvance = true;
+
+    if (
+      match.nextMatchId &&
+      match.nextMatchPosition
+    ) {
+      const nextMatch = findActiveMatch(
+        bracket,
+        match.nextMatchId
+      );
+
+      if (nextMatch) {
+        setTeamAtSlot(
+          nextMatch,
+          match.nextMatchPosition,
+          onlyTeam
+        );
+      }
+    }
+  }
+
+  propagateAutomaticByes(bracket);
+}
+
+function rebuildBracketAfterInitialReorder(
+  bracket: ActiveBracket
+): ActiveBracket {
+  if (isDoubleBracket(bracket)) {
+    const nextBracket =
+      structuredClone(bracket);
+
+    nextBracket.winnerRounds.forEach(
+      (round, roundIndex) => {
+        round.matches.forEach(
+          (match) => {
+            resetDoubleMatchForReorder(
+              match,
+              roundIndex > 0
+            );
+          }
+        );
+      }
+    );
+
+    nextBracket.loserRounds.forEach(
+      (round) => {
+        round.matches.forEach(
+          (match) => {
+            resetDoubleMatchForReorder(
+              match,
+              true
+            );
+          }
+        );
+      }
+    );
+
+    if (nextBracket.grandFinal) {
+      resetDoubleMatchForReorder(
+        nextBracket.grandFinal,
+        true
+      );
+    }
+
+    if (nextBracket.resetFinal) {
+      resetDoubleMatchForReorder(
+        nextBracket.resetFinal,
+        true
+      );
+    }
+
+    nextBracket.champion = null;
+
+    advanceInitialDoubleByes(
+      nextBracket
+    );
+
+    nextBracket.updatedAt =
+      new Date().toISOString();
+
+    delete (
+      nextBracket as BracketWithPositionLock
+    ).positionsLocked;
+
+    return nextBracket;
+  }
+
+  const nextBracket =
+    structuredClone(bracket);
+
+  nextBracket.rounds.forEach(
+    (round, roundIndex) => {
+      round.matches.forEach(
+        (match) => {
+          resetSingleMatchState(
+            match,
+            roundIndex > 0
+          );
+        }
+      );
+    }
+  );
+
+  nextBracket.champion = null;
+
+  advanceInitialSingleByes(
+    nextBracket
+  );
+
+  nextBracket.updatedAt =
+    new Date().toISOString();
+
+  delete (
+    nextBracket as BracketWithPositionLock
+  ).positionsLocked;
+
+  return nextBracket;
 }
 
 /**
@@ -698,6 +1109,7 @@ if (!cancelled) {
     }
   };
 
+
   const handleToggleLiveMatch = async (
     match: ActiveMatch
   ) => {
@@ -791,6 +1203,105 @@ if (!cancelled) {
       setUpdatingLiveMatch(false);
     }
   };
+
+
+  const handleSwapInitialParticipants =
+    async (
+      sourceTeamId: string,
+      targetTeamId: string
+    ) => {
+      if (!bracket) {
+        return;
+      }
+
+      if (
+        !isTournamentOwner ||
+        tournamentFinished ||
+        bracketPositionsAreLocked(
+          bracket
+        ) ||
+        bracketHasRealResult(bracket)
+      ) {
+        setMessage(
+          "Las posiciones ya no pueden modificarse porque el torneo ya comenzó."
+        );
+        return;
+      }
+
+      if (sourceTeamId === targetTeamId) {
+        return;
+      }
+
+      const workingBracket =
+        structuredClone(
+          bracket
+        ) as ActiveBracket;
+
+      const sourceSlot =
+        findInitialParticipantSlot(
+          workingBracket,
+          sourceTeamId
+        );
+
+      const targetSlot =
+        findInitialParticipantSlot(
+          workingBracket,
+          targetTeamId
+        );
+
+      if (!sourceSlot || !targetSlot) {
+        setMessage(
+          "No se encontraron las posiciones iniciales de los participantes seleccionados."
+        );
+        return;
+      }
+
+      const sourceTeam =
+        getTeamAtSlot(
+          sourceSlot.match,
+          sourceSlot.position
+        );
+
+      const targetTeam =
+        getTeamAtSlot(
+          targetSlot.match,
+          targetSlot.position
+        );
+
+      if (!sourceTeam || !targetTeam) {
+        return;
+      }
+
+      setTeamAtSlot(
+        sourceSlot.match,
+        sourceSlot.position,
+        targetTeam
+      );
+
+      setTeamAtSlot(
+        targetSlot.match,
+        targetSlot.position,
+        sourceTeam
+      );
+
+      const nextBracket =
+        rebuildBracketAfterInitialReorder(
+          workingBracket
+        );
+
+      const saved =
+        await updateAndSaveBracket(
+          nextBracket
+        );
+
+      if (!saved) {
+        return;
+      }
+
+      setMessage(
+        `${sourceTeam.name} ↔ ${targetTeam.name}: posiciones intercambiadas.`
+      );
+    };
 
   const handleSelectWinner = (
     match: ActiveMatch,
@@ -933,21 +1444,24 @@ if (!cancelled) {
               score2
             );
 
-          nextBracket = {
-            ...advancedBracket,
-            champion:
-              calculateChampion(
-                advancedBracket
-              ),
-          };
+          nextBracket =
+            lockBracketPositions({
+              ...advancedBracket,
+              champion:
+                calculateChampion(
+                  advancedBracket
+                ),
+            });
         } else {
           nextBracket =
-            setMatchResultAndAdvance(
-              bracket,
-              selectedDialog.match.id,
-              selectedDialog.winner.id,
-              winnerScore,
-              loserScore
+            lockBracketPositions(
+              setMatchResultAndAdvance(
+                bracket,
+                selectedDialog.match.id,
+                selectedDialog.winner.id,
+                winnerScore,
+                loserScore
+              )
             );
         }
 
@@ -1198,6 +1712,14 @@ if (!cancelled) {
   const doubleElimination =
     isDoubleBracket(bracket);
 
+  const canReorderInitialParticipants =
+    isTournamentOwner &&
+    !tournamentFinished &&
+    !bracketPositionsAreLocked(
+      bracket
+    ) &&
+    !bracketHasRealResult(bracket);
+
   return (
     <main className="min-h-screen bg-[#02070d] text-white">
       <Header />
@@ -1325,6 +1847,17 @@ if (!cancelled) {
                 </div>
               </div>
 
+              {canReorderInitialParticipants && (
+                <div className="border-b border-white/10 bg-[#0b1017] px-5 py-3">
+                  <p className="text-sm font-black text-gray-200">
+                    🔒 Arrastra y suelta los participantes para intercambiar sus posiciones.
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-gray-400">
+                    ⚠️ Las posiciones podrán modificarse únicamente antes de registrar el primer resultado.
+                  </p>
+                </div>
+              )}
+
  <BracketCanvas
   bracket={bracket}
   participantLogos={
@@ -1333,6 +1866,18 @@ if (!cancelled) {
   onSelectWinner={handleSelectWinner}
   onResetWinner={(matchId) => {
     void handleCorrectResult(matchId);
+  }}
+  canReorderParticipants={
+    canReorderInitialParticipants
+  }
+  onSwapInitialParticipants={(
+    sourceTeamId,
+    targetTeamId
+  ) => {
+    void handleSwapInitialParticipants(
+      sourceTeamId,
+      targetTeamId
+    );
   }}
   liveMatchId={liveMatchId}
   canManageLiveMatch={
