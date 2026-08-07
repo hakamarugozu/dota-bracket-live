@@ -344,6 +344,9 @@ export default function BracketCanvas({
           positions={
             layout.positions
           }
+          visibleMatches={
+            layout.visibleMatches
+          }
           championX={
             layout.championX
           }
@@ -638,23 +641,22 @@ function createDoubleBracketLayout(
 const winnerFirstRound =
   bracket.winnerRounds[0];
 
-const visibleWinnerFirstRoundCount =
-  winnerFirstRound
-    ? winnerFirstRound.matches.filter(
-        (match) =>
-          !(
-            match.automaticAdvance &&
-            Number(Boolean(match.team1)) +
-              Number(Boolean(match.team2)) <
-              2
-          )
-      ).length
-    : 1;
+/**
+ * El Winner Bracket conserva siempre la cantidad original
+ * de espacios de la primera ronda. Aunque un BYE se oculte
+ * visualmente, su espacio virtual sigue existiendo para que
+ * las rondas posteriores no se compriman ni se superpongan.
+ */
+const winnerFirstRoundSlotCount =
+  Math.max(
+    1,
+    winnerFirstRound?.matches.length ?? 0
+  );
 
 const winnerContentHeight =
   Math.max(
     SLOT_HEIGHT,
-    visibleWinnerFirstRoundCount *
+    winnerFirstRoundSlotCount *
       SLOT_HEIGHT
   );
 
@@ -899,28 +901,20 @@ function layoutDoubleRounds({
   const firstRound =
     rounds[0];
 
-  const firstRoundVisibleMatches =
-    firstRound
-      ? firstRound.matches.filter(
-          (match) =>
-            !(
-              variant === "winner" &&
-              match.automaticAdvance &&
-              Number(Boolean(match.team1)) +
-                Number(Boolean(match.team2)) <
-                2
-            )
-        )
-      : [];
-
-  const visibleFirstRoundCount =
+  /**
+   * El alto se calcula con todos los espacios originales de
+   * la primera ronda, no solo con los partidos visibles.
+   * Esto mantiene intacta la geometría del fixture cuando se
+   * elimina un participante y su encuentro pasa a ser BYE.
+   */
+  const firstRoundSlotCount =
     Math.max(
       1,
-      firstRoundVisibleMatches.length
+      firstRound?.matches.length ?? 0
     );
 
   const contentHeight =
-    visibleFirstRoundCount *
+    firstRoundSlotCount *
     SLOT_HEIGHT;
 
   rounds.forEach(
@@ -944,11 +938,12 @@ function layoutDoubleRounds({
       });
 
       if (roundIndex === 0) {
-        let visibleMatchIndex = 0;
-
         /**
-         * Primero posicionamos únicamente
-         * los partidos visibles.
+         * Cada partido conserva su posición original según
+         * matchIndex. Los BYEs pueden ocultarse como tarjeta,
+         * pero nunca pierden su espacio virtual dentro de la
+         * llave. Así los cruces posteriores permanecen en su
+         * lugar y no se superponen.
          */
         for (const match of round.matches) {
           const isHiddenBye =
@@ -958,15 +953,11 @@ function layoutDoubleRounds({
               Number(Boolean(match.team2)) <
               2;
 
-          if (isHiddenBye) {
-            continue;
-          }
-
           const centerY =
             sectionTop +
             PAD_Y +
             SLOT_HEIGHT / 2 +
-            visibleMatchIndex *
+            match.matchIndex *
               SLOT_HEIGHT;
 
           positions[match.id] = {
@@ -977,64 +968,9 @@ function layoutDoubleRounds({
               MATCH_HEIGHT / 2,
           };
 
-          visibleMatches.push(match);
-
-          visibleMatchIndex += 1;
-        }
-
-        /**
-         * Los BYEs ocultos reciben la misma
-         * posición vertical que su partido hermano.
-         *
-         * De esta forma siguen alimentando
-         * correctamente la siguiente ronda,
-         * pero no dejan un espacio vacío.
-         */
-        for (const match of round.matches) {
-          const isHiddenBye =
-            variant === "winner" &&
-            match.automaticAdvance &&
-            Number(Boolean(match.team1)) +
-              Number(Boolean(match.team2)) <
-              2;
-
           if (!isHiddenBye) {
-            continue;
+            visibleMatches.push(match);
           }
-
-          const siblingMatchIndex =
-            match.matchIndex % 2 === 0
-              ? match.matchIndex + 1
-              : match.matchIndex - 1;
-
-          const siblingMatch =
-            round.matches[
-              siblingMatchIndex
-            ];
-
-          const siblingPosition =
-            siblingMatch
-              ? positions[
-                  siblingMatch.id
-                ]
-              : null;
-
-          const fallbackCenterY =
-            sectionTop +
-            PAD_Y +
-            SLOT_HEIGHT / 2;
-
-          const centerY =
-            siblingPosition?.centerY ??
-            fallbackCenterY;
-
-          positions[match.id] = {
-            x,
-            centerY,
-            top:
-              centerY -
-              MATCH_HEIGHT / 2,
-          };
         }
 
         return;
@@ -1046,125 +982,115 @@ function layoutDoubleRounds({
           matchIndex
         ) => {
           const previousRound =
-  rounds[
-    roundIndex - 1
-  ];
+            rounds[
+              roundIndex - 1
+            ];
 
-const sameMatchCount =
-  previousRound.matches.length ===
-  round.matches.length;
+          const sameMatchCount =
+            previousRound.matches.length ===
+            round.matches.length;
 
-let centerY: number;
+          let centerY: number;
 
-/**
- * En las rondas del Loser Bracket que conservan
- * la misma cantidad de partidos, cada encuentro
- * continúa alineado con el partido anterior
- * que ocupa el mismo índice.
- *
- * Ejemplo:
- * Loser R1: 2 partidos
- * Loser R2: 2 partidos
- */
-if (
-  variant === "loser" &&
-  sameMatchCount
-) {
-  const previousMatch =
-    previousRound.matches[
-      matchIndex
-    ];
+          /**
+           * En las rondas del Loser Bracket que conservan
+           * la misma cantidad de partidos, cada encuentro
+           * continúa alineado con el partido anterior
+           * que ocupa el mismo índice.
+           */
+          if (
+            variant === "loser" &&
+            sameMatchCount
+          ) {
+            const previousMatch =
+              previousRound.matches[
+                matchIndex
+              ];
 
-  const previousPosition =
-    previousMatch
-      ? positions[
-          previousMatch.id
-        ]
-      : null;
+            const previousPosition =
+              previousMatch
+                ? positions[
+                    previousMatch.id
+                  ]
+                : null;
 
-  if (previousPosition) {
-    centerY =
-      previousPosition.centerY;
-  } else {
-    const spacing =
-      contentHeight /
-      Math.max(
-        1,
-        round.matches.length
-      );
+            if (previousPosition) {
+              centerY =
+                previousPosition.centerY;
+            } else {
+              const spacing =
+                contentHeight /
+                Math.max(
+                  1,
+                  round.matches.length
+                );
 
-    centerY =
-      sectionTop +
-      spacing / 2 +
-      matchIndex *
-        spacing;
-  }
-} else {
-  /**
-   * Cuando la ronda reduce su cantidad de partidos,
-   * dos encuentros anteriores alimentan uno nuevo.
-   */
-  const firstPrevious =
-    previousRound.matches[
-      matchIndex * 2
-    ];
+              centerY =
+                sectionTop +
+                spacing / 2 +
+                matchIndex *
+                  spacing;
+            }
+          } else {
+            /**
+             * Cuando la ronda reduce su cantidad de partidos,
+             * dos encuentros anteriores alimentan uno nuevo.
+             */
+            const firstPrevious =
+              previousRound.matches[
+                matchIndex * 2
+              ];
 
-  const secondPrevious =
-    previousRound.matches[
-      matchIndex * 2 + 1
-    ];
+            const secondPrevious =
+              previousRound.matches[
+                matchIndex * 2 + 1
+              ];
 
-  const firstPosition =
-    firstPrevious
-      ? positions[
-          firstPrevious.id
-        ]
-      : null;
+            const firstPosition =
+              firstPrevious
+                ? positions[
+                    firstPrevious.id
+                  ]
+                : null;
 
-  const secondPosition =
-    secondPrevious
-      ? positions[
-          secondPrevious.id
-        ]
-      : null;
+            const secondPosition =
+              secondPrevious
+                ? positions[
+                    secondPrevious.id
+                  ]
+                : null;
 
-  if (
-    firstPosition &&
-    secondPosition
-  ) {
-    centerY =
-      (
-        firstPosition.centerY +
-        secondPosition.centerY
-      ) / 2;
-  } else if (firstPosition) {
-    centerY =
-      firstPosition.centerY;
-  } else if (secondPosition) {
-    centerY =
-      secondPosition.centerY;
-  } else {
-    const spacing =
-      contentHeight /
-      Math.max(
-        1,
-        round.matches.length
-      );
+            if (
+              firstPosition &&
+              secondPosition
+            ) {
+              centerY =
+                (
+                  firstPosition.centerY +
+                  secondPosition.centerY
+                ) / 2;
+            } else if (firstPosition) {
+              centerY =
+                firstPosition.centerY;
+            } else if (secondPosition) {
+              centerY =
+                secondPosition.centerY;
+            } else {
+              const spacing =
+                contentHeight /
+                Math.max(
+                  1,
+                  round.matches.length
+                );
 
-    centerY =
-      sectionTop +
-      spacing / 2 +
-      matchIndex *
-        spacing;
-  }
-}
-if (
-  variant === "winner" &&
-  roundIndex === 1 &&
-  matchIndex === 0
-) {
-  centerY -= 24;
-}
+              centerY =
+                sectionTop +
+                spacing / 2 +
+                matchIndex *
+                  spacing;
+            }
+          }
+
           positions[match.id] = {
             x,
             centerY,
@@ -1179,6 +1105,7 @@ if (
     }
   );
 }
+
 function SectionLabels({
   labels,
 }: {
@@ -1276,6 +1203,7 @@ function RoundHeaders({
 function BracketConnections({
   bracket,
   positions,
+  visibleMatches,
   championX,
   championY,
 }: {
@@ -1283,21 +1211,31 @@ function BracketConnections({
 
   positions: PositionMap;
 
+  visibleMatches: ActiveMatch[];
+
   championX: number;
 
   championY: number;
 }) {
+  const visibleMatchIds = new Set(
+    visibleMatches.map(
+      (match) => match.id
+    )
+  );
+
   const paths =
     isDoubleBracket(bracket)
       ? createDoubleConnections(
           bracket,
           positions,
+          visibleMatchIds,
           championX,
           championY
         )
       : createSingleConnections(
           bracket,
           positions,
+          visibleMatchIds,
           championX
         );
 
@@ -1336,6 +1274,7 @@ function BracketConnections({
 function createSingleConnections(
   bracket: TournamentBracket,
   positions: PositionMap,
+  visibleMatchIds: Set<string>,
   championX: number
 ): ConnectionPath[] {
   const paths:
@@ -1346,7 +1285,10 @@ function createSingleConnections(
       round.matches.forEach(
         (match) => {
           if (
-            !match.nextMatchId
+            !match.nextMatchId ||
+            !visibleMatchIds.has(
+              match.id
+            )
           ) {
             return;
           }
@@ -1432,6 +1374,7 @@ function createSingleConnections(
 function createDoubleConnections(
   bracket: DoubleTournamentBracket,
   positions: PositionMap,
+  visibleMatchIds: Set<string>,
   championX: number,
   championY: number
 ): ConnectionPath[] {
@@ -1449,6 +1392,7 @@ function createDoubleConnections(
       addDoubleMatchConnections({
         paths,
         positions,
+        visibleMatchIds,
         match,
       });
     }
@@ -1465,6 +1409,7 @@ function createDoubleConnections(
       addDoubleMatchConnections({
         paths,
         positions,
+        visibleMatchIds,
         match,
       });
     }
@@ -1474,6 +1419,7 @@ function createDoubleConnections(
     addDoubleMatchConnections({
       paths,
       positions,
+      visibleMatchIds,
       match:
         bracket.grandFinal,
     });
@@ -1521,22 +1467,63 @@ const championSource =
 function addDoubleMatchConnections({
   paths,
   positions,
+  visibleMatchIds,
   match,
 }: {
   paths: ConnectionPath[];
 
   positions: PositionMap;
 
+  visibleMatchIds: Set<string>;
+
   match: DoubleBracketMatch;
 }) {
   const source =
     positions[match.id];
 
-  if (!source) {
+  if (
+    !source ||
+    !visibleMatchIds.has(
+      match.id
+    )
+  ) {
     return;
   }
 
-  if (match.nextMatchId) {
+  const participantCount =
+    Number(Boolean(match.team1)) +
+    Number(Boolean(match.team2));
+
+  /**
+   * En el Winner Bracket los BYEs de primera ronda se
+   * mantienen como posiciones virtuales para conservar la
+   * geometría, pero su tarjeta está oculta. No dibujamos
+   * conexiones desde una tarjeta invisible porque producen
+   * líneas largas y aparentemente desconectadas.
+   */
+  const isHiddenWinnerBye =
+    match.section === "winner" &&
+    match.automaticAdvance &&
+    participantCount < 2;
+
+  if (isHiddenWinnerBye) {
+    return;
+  }
+
+  /**
+   * Un BYE vacío del Loser Bracket cierra una ruta sin
+   * ganador. Por tanto, tampoco debe dibujar una línea hacia
+   * la siguiente ronda. Un BYE con un participante sí conserva
+   * su conexión porque ese jugador avanza automáticamente.
+   */
+  const hasWinnerToAdvance =
+    !match.automaticAdvance ||
+    participantCount === 1;
+
+  if (
+    hasWinnerToAdvance &&
+    match.nextMatchId
+  ) {
     const destination =
       positions[
         match.nextMatchId
@@ -1563,8 +1550,14 @@ function addDoubleMatchConnections({
     }
   }
 
+  /**
+   * Solo un partido real con dos participantes puede producir
+   * un perdedor. Los BYEs nunca envían equipos al Loser Bracket.
+   */
   if (
     match.section === "winner" &&
+    !match.automaticAdvance &&
+    participantCount === 2 &&
     match.loserNextMatchId
   ) {
     const loserDestination =

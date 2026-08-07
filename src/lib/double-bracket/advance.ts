@@ -7,6 +7,8 @@ import type {
 
 import {
   findDoubleMatch,
+  getMatchLoser,
+  getMatchWinner,
   isMatchReady,
   placeTeamInMatch,
 } from "./helpers";
@@ -191,22 +193,27 @@ function advanceLoser(
  * Solo se activa cuando el participante proveniente
  * del Loser Bracket gana la Gran Final.
  */
-/**
- * Limpia cualquier información antigua
- * almacenada en la Final de Reinicio.
- *
- * La estructura se conserva por compatibilidad,
- * pero ya no se utilizará para disputar otro partido.
- */
-function clearResetFinal(
-  bracket: DoubleTournamentBracket
+function activateResetFinal(
+  bracket: DoubleTournamentBracket,
+  grandFinal: DoubleBracketMatch
 ): void {
   if (!bracket.resetFinal) {
-    return;
+    throw new Error(
+      "La Final de Reinicio no existe en el bracket."
+    );
   }
 
-  bracket.resetFinal.team1 = null;
-  bracket.resetFinal.team2 = null;
+  if (!grandFinal.team1 || !grandFinal.team2) {
+    throw new Error(
+      "La Gran Final no tiene ambos participantes."
+    );
+  }
+
+  bracket.resetFinal.team1 =
+    grandFinal.team1;
+
+  bracket.resetFinal.team2 =
+    grandFinal.team2;
 
   bracket.resetFinal.score1 = 0;
   bracket.resetFinal.score2 = 0;
@@ -219,11 +226,13 @@ function clearResetFinal(
 }
 
 /**
- * Procesa la Gran Final.
+ * Procesa el resultado especial de la Gran Final.
  *
- * El ganador se convierte directamente
- * en campeón, independientemente de si llegó
- * desde el Winner Bracket o el Loser Bracket.
+ * team1: campeón del Winner Bracket.
+ * team2: campeón del Loser Bracket.
+ *
+ * Si gana team1, el torneo termina sin Reset Final.
+ * Si gana team2, se activa la Reset Final.
  */
 function processGrandFinalResult(
   bracket: DoubleTournamentBracket,
@@ -236,20 +245,51 @@ function processGrandFinalResult(
     );
   }
 
-  const winnerBelongsToMatch =
-    match.team1.id === winner.id ||
-    match.team2.id === winner.id;
+  const winnerBracketChampion =
+    match.team1;
 
-  if (!winnerBelongsToMatch) {
-    throw new Error(
-      "El ganador de la Gran Final no coincide con sus participantes."
-    );
+  const loserBracketChampion =
+    match.team2;
+
+  if (
+    winner.id === winnerBracketChampion.id
+  ) {
+    if (bracket.resetFinal) {
+      bracket.resetFinal.team1 = null;
+      bracket.resetFinal.team2 = null;
+
+      bracket.resetFinal.score1 = 0;
+      bracket.resetFinal.score2 = 0;
+
+      bracket.resetFinal.winnerId = null;
+      bracket.resetFinal.loserId = null;
+
+      bracket.resetFinal.completed = false;
+      bracket.resetFinal.automaticAdvance = false;
+    }
+
+    return;
   }
 
-  clearResetFinal(bracket);
+  if (
+    winner.id === loserBracketChampion.id
+  ) {
+    activateResetFinal(
+      bracket,
+      match
+    );
 
-  bracket.champion = winner;
+    return;
+  }
+
+  throw new Error(
+    "El ganador de la Gran Final no coincide con sus participantes."
+  );
 }
+
+/**
+ * Devuelve todos los partidos del bracket.
+ */
 function getAllDoubleMatches(
   bracket: DoubleTournamentBracket
 ): DoubleBracketMatch[] {
@@ -326,6 +366,20 @@ function getOnlyTeam(
 }
 
 /**
+ * Comprueba si el partido quedó completamente vacío.
+ *
+ * Esto puede ocurrir en el Loser Bracket cuando los
+ * dos partidos que debían enviar perdedores fueron
+ * resueltos por BYE y, por lo tanto, no produjeron
+ * ningún participante.
+ */
+function isEmptyMatch(
+  match: DoubleBracketMatch
+): boolean {
+  return !match.team1 && !match.team2;
+}
+
+/**
  * Resuelve automáticamente un partido afectado
  * por un BYE y mueve al único participante.
  */
@@ -351,16 +405,40 @@ function completeAutomaticBye(
 }
 
 /**
+ * Cierra un partido que ya no puede recibir a ningún
+ * participante porque todas sus rutas entrantes fueron
+ * resueltas sin producir ganador o perdedor para él.
+ *
+ * No envía ningún equipo hacia la siguiente ronda.
+ * Su única finalidad es indicar que esa ruta ya terminó,
+ * permitiendo que un partido posterior con un solo equipo
+ * pueda resolverse correctamente por BYE.
+ */
+function completeAutomaticEmptyMatch(
+  match: DoubleBracketMatch
+): void {
+  match.score1 = 0;
+  match.score2 = 0;
+
+  match.winnerId = null;
+  match.loserId = null;
+
+  match.completed = true;
+  match.automaticAdvance = true;
+}
+
+/**
  * Propaga los BYEs que aparezcan en rondas posteriores.
  *
  * Esto es especialmente importante en el Loser Bracket,
  * porque un partido del Winner Bracket ganado por BYE
  * no genera un perdedor.
  */
-function propagateAutomaticByes(
+export function propagateAutomaticByes(
   bracket: DoubleTournamentBracket
-): void {
+): boolean {
   let bracketChanged = true;
+  let anyByeWasPropagated = false;
 
   while (bracketChanged) {
     bracketChanged = false;
@@ -379,13 +457,6 @@ function propagateAutomaticByes(
         continue;
       }
 
-      const onlyTeam =
-        getOnlyTeam(match);
-
-      if (!onlyTeam) {
-        continue;
-      }
-
       const incomingResolved =
         areIncomingMatchesResolved(
           bracket,
@@ -396,15 +467,33 @@ function propagateAutomaticByes(
         continue;
       }
 
-      completeAutomaticBye(
-        bracket,
-        match,
-        onlyTeam
-      );
+      const onlyTeam =
+        getOnlyTeam(match);
 
-      bracketChanged = true;
+      if (onlyTeam) {
+        completeAutomaticBye(
+          bracket,
+          match,
+          onlyTeam
+        );
+
+        bracketChanged = true;
+        anyByeWasPropagated = true;
+        continue;
+      }
+
+      if (isEmptyMatch(match)) {
+        completeAutomaticEmptyMatch(
+          match
+        );
+
+        bracketChanged = true;
+        anyByeWasPropagated = true;
+      }
     }
   }
+
+  return anyByeWasPropagated;
 }
 
 /**

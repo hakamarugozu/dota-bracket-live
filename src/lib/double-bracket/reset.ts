@@ -10,6 +10,10 @@ import {
   resetDoubleMatchState,
 } from "./helpers";
 
+import {
+  propagateAutomaticByes,
+} from "./advance";
+
 /**
  * Crea una copia independiente del bracket.
  *
@@ -574,10 +578,42 @@ export function repairDoubleBracketConsistency(
       currentBracket
     );
 
-  const changed =
+  const reconciledBeforeByes =
     reconcileDoubleBracketInPlace(
       bracket
     );
+
+  /**
+   * Al eliminar un participante, el SQL puede
+   * convertir su partido del Winner Bracket en BYE.
+   * Ese partido no produce perdedor, por lo que el
+   * encuentro correspondiente del Loser Bracket puede
+   * quedar con un único participante válido.
+   *
+   * La propagación automática resuelve ese BYE sin
+   * reordenar ninguna llave y mueve al participante
+   * a la posición que ya tenía asignada.
+   */
+  const propagatedByes =
+    propagateAutomaticByes(
+      bracket
+    );
+
+  /**
+   * Los BYEs recién propagados pueden haber creado
+   * nuevas entradas válidas en rondas posteriores.
+   * Una segunda reconciliación garantiza que no quede
+   * ningún participante huérfano ni una posición vieja.
+   */
+  const reconciledAfterByes =
+    reconcileDoubleBracketInPlace(
+      bracket
+    );
+
+  const changed =
+    reconciledBeforeByes ||
+    propagatedByes ||
+    reconciledAfterByes;
 
   if (changed) {
     bracket.updatedAt =
