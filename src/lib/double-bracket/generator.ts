@@ -42,6 +42,47 @@ function getNextPowerOfTwo(
   return bracketSize;
 }
 
+function getDistributedFirstRoundMatchIndexes(
+  firstRoundMatchCount: number,
+  realMatchCount: number
+): Set<number> {
+  const indexes = new Set<number>();
+
+  if (
+    firstRoundMatchCount <= 0 ||
+    realMatchCount <= 0
+  ) {
+    return indexes;
+  }
+
+  const safeRealMatchCount = Math.min(
+    firstRoundMatchCount,
+    realMatchCount
+  );
+
+  for (
+    let index = 0;
+    index < safeRealMatchCount;
+    index += 1
+  ) {
+    const distributedIndex =
+      Math.floor(
+        ((index + 0.5) *
+          firstRoundMatchCount) /
+          safeRealMatchCount
+      );
+
+    indexes.add(
+      Math.min(
+        firstRoundMatchCount - 1,
+        distributedIndex
+      )
+    );
+  }
+
+  return indexes;
+}
+
 /**
  * Crea la estructura interna de un equipo.
  */
@@ -448,8 +489,18 @@ function createWinnerRounds(
   const participantCount =
     teams.length;
 
-  const byeCount =
-    bracketSize - participantCount;
+  const firstRoundMatchCount =
+    bracketSize / 2;
+
+  const realFirstRoundMatchCount =
+    participantCount -
+    firstRoundMatchCount;
+
+  const realFirstRoundMatchIndexes =
+    getDistributedFirstRoundMatchIndexes(
+      firstRoundMatchCount,
+      realFirstRoundMatchCount
+    );
 
   const winnerRounds:
     DoubleBracketRound[] = [];
@@ -505,12 +556,12 @@ function createWinnerRounds(
         BracketTeam | null = null;
 
       if (roundIndex === 0) {
-        if (matchIndex < byeCount) {
-          team1 =
-            teams[teamCursor] ?? null;
+        const isRealFirstRoundMatch =
+          realFirstRoundMatchIndexes.has(
+            matchIndex
+          );
 
-          teamCursor += 1;
-        } else {
+        if (isRealFirstRoundMatch) {
           team1 =
             teams[teamCursor] ?? null;
 
@@ -518,6 +569,11 @@ function createWinnerRounds(
             teams[teamCursor + 1] ?? null;
 
           teamCursor += 2;
+        } else {
+          team1 =
+            teams[teamCursor] ?? null;
+
+          teamCursor += 1;
         }
       }
 

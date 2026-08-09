@@ -194,6 +194,47 @@ function getNextPowerOfTwo(
   return bracketSize;
 }
 
+function getDistributedFirstRoundMatchIndexes(
+  firstRoundMatchCount: number,
+  realMatchCount: number
+): Set<number> {
+  const indexes = new Set<number>();
+
+  if (
+    firstRoundMatchCount <= 0 ||
+    realMatchCount <= 0
+  ) {
+    return indexes;
+  }
+
+  const safeRealMatchCount = Math.min(
+    firstRoundMatchCount,
+    realMatchCount
+  );
+
+  for (
+    let index = 0;
+    index < safeRealMatchCount;
+    index += 1
+  ) {
+    const distributedIndex =
+      Math.floor(
+        ((index + 0.5) *
+          firstRoundMatchCount) /
+          safeRealMatchCount
+      );
+
+    indexes.add(
+      Math.min(
+        firstRoundMatchCount - 1,
+        distributedIndex
+      )
+    );
+  }
+
+  return indexes;
+}
+
 function placeWinnerInNextMatch(
   bracket: TournamentBracket,
   match: BracketMatch,
@@ -360,8 +401,15 @@ const bracketTeams =
   const firstRoundMatchCount =
     bracketSize / 2;
 
-  const byeCount =
-    bracketSize - participantCount;
+  const realFirstRoundMatchCount =
+    participantCount -
+    firstRoundMatchCount;
+
+  const realFirstRoundMatchIndexes =
+    getDistributedFirstRoundMatchIndexes(
+      firstRoundMatchCount,
+      realFirstRoundMatchCount
+    );
 
   let teamCursor = 0;
 
@@ -418,24 +466,26 @@ const bracketTeams =
 
       if (roundIndex === 0) {
         /*
-         * Cuando faltan participantes para completar la potencia de 2,
-         * los primeros sembrados reciben un pase automático.
+         * Los enfrentamientos reales se distribuyen de forma uniforme
+         * a lo largo de toda la primera ronda.
          *
-         * Ejemplo con 5 participantes:
-         * - La llave usa 8 posiciones.
-         * - Hay 3 pases automáticos.
-         * - Cada partido inicial conserva al menos un participante.
+         * Los demás espacios reciben un solo participante y avanzan
+         * automáticamente por BYE.
          *
-         * De esta forma nadie recibe dos pases consecutivos y no se crean
-         * partidos completamente vacíos en la primera ronda.
+         * Ejemplo con 34 participantes en una llave de 64:
+         * - 32 espacios de partido en la Ronda de 64.
+         * - 2 enfrentamientos reales.
+         * - 30 BYEs repartidos alrededor de esos enfrentamientos.
+         *
+         * Así evitamos que todos los partidos jugables queden
+         * amontonados al final de la llave.
          */
-        if (matchIndex < byeCount) {
-          team1 =
-            bracketTeams[teamCursor] ||
-            null;
+        const isRealFirstRoundMatch =
+          realFirstRoundMatchIndexes.has(
+            matchIndex
+          );
 
-          teamCursor += 1;
-        } else {
+        if (isRealFirstRoundMatch) {
           team1 =
             bracketTeams[teamCursor] ||
             null;
@@ -445,6 +495,12 @@ const bracketTeams =
             null;
 
           teamCursor += 2;
+        } else {
+          team1 =
+            bracketTeams[teamCursor] ||
+            null;
+
+          teamCursor += 1;
         }
       }
 

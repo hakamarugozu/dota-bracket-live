@@ -872,18 +872,38 @@ if (!cancelled) {
         /**
          * Un fixture guardado es la fuente oficial del torneo.
          *
-         * Agregar o eliminar participantes en la lista oficial
-         * no debe regenerar la llave ni borrar cruces, resultados,
-         * avances o posiciones existentes.
+         * Mientras la cantidad de participantes siga cabiendo dentro
+         * del tamaño actual de la llave, se conserva exactamente como
+         * está para no borrar cruces, BYEs, posiciones ni avances.
          *
-         * Solo se genera un fixture nuevo cuando todavía no existe
-         * uno guardado o cuando el formato almacenado no coincide.
+         * Si la lista oficial supera el tamaño de la llave guardada,
+         * el fixture puede ampliarse automáticamente únicamente cuando
+         * el torneo todavía no registró ningún resultado real y las
+         * posiciones nunca fueron bloqueadas.
          */
+        const savedBracketNeedsExpansion =
+          savedBracket !== null &&
+          savedBracket.tournamentId ===
+            tournamentId &&
+          savedFormat === expectedFormat &&
+          participantCount >
+            savedBracket.teamCount &&
+          !bracketHasRealResult(
+            savedBracket
+          ) &&
+          !bracketPositionsAreLocked(
+            savedBracket
+          ) &&
+          !isTournamentFinished(
+            tournamentWithTeams.status
+          );
+
         const savedBracketIsValid =
           savedBracket !== null &&
           savedBracket.tournamentId ===
             tournamentId &&
-          savedFormat === expectedFormat;
+          savedFormat === expectedFormat &&
+          !savedBracketNeedsExpansion;
 
         if (savedBracketIsValid) {
           /**
@@ -978,6 +998,12 @@ if (!cancelled) {
           setBracket(
             bracketWithTournamentId
           );
+
+          if (savedBracketNeedsExpansion) {
+            setMessage(
+              `El fixture se amplió automáticamente a ${bracketWithTournamentId.teamCount} participantes.`
+            );
+          }
         }
       } catch (error) {
         if (!cancelled) {
