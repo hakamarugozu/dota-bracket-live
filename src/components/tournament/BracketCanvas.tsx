@@ -115,6 +115,8 @@ type Props = {
 
   participantLogos?: ParticipantLogoMap;
 
+  canManageResults?: boolean;
+
   onSelectWinner: (
     match: ActiveMatch,
     winnerId: string
@@ -188,6 +190,7 @@ function isDoubleMatch(
 export default function BracketCanvas({
   bracket,
   participantLogos = {},
+  canManageResults = true,
   onSelectWinner,
   onResetWinner,
   canReorderParticipants = false,
@@ -534,6 +537,9 @@ export default function BracketCanvas({
                   match={match}
                   participantLogos={
                     participantLogos
+                  }
+                  canManageResults={
+                    canManageResults
                   }
                   onSelectWinner={
                     onSelectWinner
@@ -1918,6 +1924,7 @@ function ParticipantAvatar({
 function MatchCard({
   match,
   participantLogos,
+  canManageResults,
   onSelectWinner,
   onResetWinner,
   canReorderParticipants,
@@ -1936,6 +1943,8 @@ function MatchCard({
   match: ActiveMatch;
 
   participantLogos: ParticipantLogoMap;
+
+  canManageResults: boolean;
 
   onSelectWinner: (
     match: ActiveMatch,
@@ -2119,6 +2128,9 @@ function MatchCard({
         participantLogos={
           participantLogos
         }
+        canManageResults={
+          canManageResults
+        }
         score={match.score1}
         winner={
           match.winnerId ===
@@ -2159,6 +2171,9 @@ function MatchCard({
         participantLogos={
           participantLogos
         }
+        canManageResults={
+          canManageResults
+        }
         score={match.score2}
         winner={
           match.winnerId ===
@@ -2196,7 +2211,7 @@ function MatchCard({
           <div className="absolute bottom-0 left-0 flex h-[20px] w-full items-center justify-center border-t border-white/10 bg-amber-950/30 text-[8px] font-black text-amber-300">
             AVANCE AUTOMÁTICO POR BYE
           </div>
-        ) : (
+        ) : canManageResults ? (
           <button
             type="button"
             onClick={() =>
@@ -2208,11 +2223,17 @@ function MatchCard({
           >
             CORREGIR RESULTADO
           </button>
+        ) : (
+          <div className="absolute bottom-0 left-0 flex h-[20px] w-full items-center justify-center border-t border-white/10 bg-black/20 text-[8px] font-black text-gray-500">
+            RESULTADO REGISTRADO
+          </div>
         )
       ) : (
         <div className="absolute bottom-0 left-0 flex h-[20px] w-full items-center justify-center border-t border-white/10 bg-black/20 text-[8px] font-black text-gray-500">
           {playable
-            ? "CLIC EN EL EQUIPO GANADOR"
+            ? canManageResults
+              ? "CLIC EN EL EQUIPO GANADOR"
+              : "PARTIDO PENDIENTE"
             : "ESPERANDO GANADORES"}
         </div>
       )}
@@ -2224,6 +2245,7 @@ function TeamRow({
   match,
   team,
   participantLogos,
+  canManageResults,
   score,
   winner,
   onSelectWinner,
@@ -2241,6 +2263,8 @@ function TeamRow({
   team: BracketTeam | null;
 
   participantLogos: ParticipantLogoMap;
+
+  canManageResults: boolean;
 
   score: number;
 
@@ -2285,6 +2309,7 @@ function TeamRow({
   onParticipantDragEnd: () => void;
 }) {
   const disabled =
+    !canManageResults ||
     !team ||
     (isDoubleMatch(match) &&
       match.automaticAdvance);
@@ -2403,7 +2428,9 @@ function TeamRow({
           <p className="mt-0.5 text-[8px] font-bold text-gray-500">
             {!team
               ? "POR DEFINIR"
-              : `SEED #${team.seed} · CLIC PARA ELEGIR`}
+              : canManageResults
+                ? `SEED #${team.seed} · CLIC PARA ELEGIR`
+                : `SEED #${team.seed}`}
           </p>
         </div>
 

@@ -651,6 +651,12 @@ export default function BracketView({
   const [isTournamentOwner, setIsTournamentOwner] =
     useState(false);
 
+  const [isAuthenticated, setIsAuthenticated] =
+    useState(false);
+
+  const [canManageBracket, setCanManageBracket] =
+    useState(false);
+
   const [liveMatchId, setLiveMatchId] =
     useState<string | null>(null);
 
@@ -713,27 +719,61 @@ export default function BracketView({
 
           return;
         }
-const {
-  data: { user },
-} = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-const {
-  data: tournamentOwner,
-} = await supabase
-  .from("tournaments")
-  .select("user_id")
-  .eq("id", tournamentId)
-  .maybeSingle();
+        const authenticated =
+          Boolean(user?.id);
 
-if (!cancelled) {
-  setIsTournamentOwner(
-    Boolean(
-      user?.id &&
-      tournamentOwner?.user_id &&
-      user.id === tournamentOwner.user_id
-    )
-  );
-}
+        const {
+          data: tournamentOwner,
+        } = await supabase
+          .from("tournaments")
+          .select("user_id")
+          .eq("id", tournamentId)
+          .maybeSingle();
+
+        const owner =
+          Boolean(
+            user?.id &&
+            tournamentOwner?.user_id &&
+            user.id === tournamentOwner.user_id
+          );
+
+        let canManageBracketAccess =
+          owner;
+
+        if (user?.id && !owner) {
+          const {
+            data: permissionData,
+            error: permissionError,
+          } = await supabase.rpc(
+            "can_manage_tournament_bracket",
+            {
+              p_tournament_id: tournamentId,
+            }
+          );
+
+          if (!permissionError) {
+            canManageBracketAccess =
+              permissionData === true;
+          }
+        }
+
+        if (!cancelled) {
+          setIsAuthenticated(
+            authenticated
+          );
+
+          setIsTournamentOwner(
+            owner
+          );
+
+          setCanManageBracket(
+            canManageBracketAccess
+          );
+        }
         const dbTeams =
           await getTeams(
             tournamentId
@@ -882,6 +922,7 @@ if (!cancelled) {
          * posiciones nunca fueron bloqueadas.
          */
         const savedBracketNeedsExpansion =
+          canManageBracketAccess &&
           savedBracket !== null &&
           savedBracket.tournamentId ===
             tournamentId &&
@@ -915,7 +956,10 @@ if (!cancelled) {
            * después de corregir resultados, editar participantes
            * o rehacer parcialmente el fixture.
            */
-          if (isDoubleBracket(savedBracket)) {
+          if (
+            isDoubleBracket(savedBracket) &&
+            canManageBracketAccess
+          ) {
             const repairedBracket =
               repairDoubleBracketConsistency(
                 savedBracket
@@ -966,8 +1010,13 @@ if (!cancelled) {
           return;
         }
 
-        if (participantCount < 2) {
-          setBracket(null);
+        if (
+          participantCount < 2 ||
+          !canManageBracketAccess
+        ) {
+          setBracket(
+            savedBracket
+          );
           return;
         }
 
@@ -1079,6 +1128,10 @@ if (!cancelled) {
   const updateAndSaveBracket = async (
     nextBracket: ActiveBracket
   ): Promise<boolean> => {
+    if (!canManageBracket) {
+      return false;
+    }
+
     const previousBracket =
       bracket;
 
@@ -1333,6 +1386,10 @@ if (!cancelled) {
     match: ActiveMatch,
     winnerId: string
   ) => {
+    if (!canManageBracket) {
+      return;
+    }
+
     if (tournamentFinished) {
       setMessage(
         "El torneo está finalizado. Los resultados ya no pueden modificarse."
@@ -1411,7 +1468,8 @@ if (!cancelled) {
     async () => {
       if (
         !bracket ||
-        !dialog
+        !dialog ||
+        !canManageBracket
       ) {
         return;
       }
@@ -1519,7 +1577,10 @@ if (!cancelled) {
     async (
       matchId: string
     ) => {
-      if (!bracket) {
+      if (
+        !bracket ||
+        !canManageBracket
+      ) {
         return;
       }
 
@@ -1568,7 +1629,10 @@ if (!cancelled) {
 
   const handleResetTournament =
     async () => {
-      if (!tournament) {
+      if (
+        !tournament ||
+        !isTournamentOwner
+      ) {
         return;
       }
 
@@ -1748,7 +1812,11 @@ if (!cancelled) {
 
   return (
     <main className="min-h-screen bg-[#02070d] text-white">
-      <Header />
+      <Header
+        isAuthenticated={
+          isAuthenticated
+        }
+      />
 
 <TournamentHero
   tournament={tournament}
@@ -1769,7 +1837,7 @@ if (!cancelled) {
         />
       )}
 
-      {dialog && (
+      {dialog && canManageBracket && (
         <ResultModal
           match={dialog.match}
           winner={dialog.winner}
@@ -1815,7 +1883,9 @@ if (!cancelled) {
                   <p className="mt-2 text-sm text-gray-400">
                     {tournamentFinished
                       ? "El torneo está finalizado. Los resultados quedan disponibles en modo de consulta."
-                      : "Haz clic en el equipo ganador y registra el resultado."}
+                      : canManageBracket
+                        ? "Haz clic en el equipo ganador y registra el resultado."
+                        : "Consulta los cruces y resultados del torneo en tiempo real."}
                   </p>
                 </div>
 
@@ -1889,6 +1959,10 @@ if (!cancelled) {
   participantLogos={
     participantLogos
   }
+  canManageResults={
+    canManageBracket &&
+    !tournamentFinished
+  }
   onSelectWinner={handleSelectWinner}
   onResetWinner={(matchId) => {
     void handleCorrectResult(matchId);
@@ -1931,7 +2005,9 @@ if (!cancelled) {
                 bracket={bracket}
               />
 
-              <InstructionsPanel />
+              {canManageBracket && (
+                <InstructionsPanel />
+              )}
 
               {isTournamentOwner && (
                 <div className="space-y-3">
@@ -1953,12 +2029,14 @@ if (!cancelled) {
                 </div>
               )}
 
-              <Link
-                href="/create"
-                className="flex w-full items-center justify-center rounded-xl bg-red-600 px-5 py-3.5 text-sm font-black transition hover:bg-red-700"
-              >
-                + CREAR OTRO TORNEO
-              </Link>
+              {isAuthenticated && (
+                <Link
+                  href="/create"
+                  className="flex w-full items-center justify-center rounded-xl bg-red-600 px-5 py-3.5 text-sm font-black transition hover:bg-red-700"
+                >
+                  + CREAR OTRO TORNEO
+                </Link>
+              )}
             </aside>
           </div>
         </section>
