@@ -1077,6 +1077,53 @@ export default function BracketView({
     };
   }, [tournamentId]);
 
+  /**
+   * Mantiene el fixture sincronizado en tiempo real.
+   *
+   * Cada vez que Supabase actualiza la fila del bracket de este
+   * torneo, todos los espectadores y administradores que tengan
+   * la página abierta reciben el nuevo JSON sin necesidad de F5.
+   *
+   * Esta suscripción es únicamente de lectura: no modifica cruces,
+   * resultados, BYEs, posiciones ni permisos de administración.
+   */
+  useEffect(() => {
+    const channel = supabase
+      .channel(
+        `bracket-realtime-${tournamentId}`
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "brackets",
+          filter: `tournament_id=eq.${tournamentId}`,
+        },
+        (payload) => {
+          const incomingBracket =
+            payload.new?.bracket as
+              | ActiveBracket
+              | undefined;
+
+          if (!incomingBracket) {
+            return;
+          }
+
+          setBracket(
+            incomingBracket
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(
+        channel
+      );
+    };
+  }, [tournamentId]);
+
   useEffect(() => {
     if (!message) {
       return;
