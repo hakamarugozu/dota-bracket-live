@@ -5,6 +5,20 @@ import {
   verifySuperAdminRequest,
 } from "@/lib/admin";
 
+function getOptionalText(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+
+  return normalizedValue
+    ? normalizedValue
+    : null;
+}
+
 export async function GET(
   request: Request,
 ) {
@@ -51,13 +65,24 @@ export async function GET(
   }
 
   const users = data.users.map(
-    (user) => ({
-      id: user.id,
-      email: user.email ?? "",
-      created_at: user.created_at,
-      last_sign_in_at:
-        user.last_sign_in_at ?? null,
-    }),
+    (user) => {
+      const username =
+        getOptionalText(
+          user.user_metadata?.username,
+        ) ??
+        getOptionalText(
+          user.user_metadata?.full_name,
+        );
+
+      return {
+        id: user.id,
+        username,
+        email: user.email ?? "",
+        created_at: user.created_at,
+        last_sign_in_at:
+          user.last_sign_in_at ?? null,
+      };
+    },
   );
 
   return NextResponse.json({

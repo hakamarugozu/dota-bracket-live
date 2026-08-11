@@ -12,6 +12,7 @@ type AdminStatus =
 
 type AdminUser = {
   id: string;
+  username: string | null;
   email: string;
   created_at: string;
   last_sign_in_at: string | null;
@@ -155,22 +156,27 @@ function getTournamentModeLabel(
 function getTournamentOwner(
   tournament: AdminTournament,
   users: AdminUser[],
-): string {
+): AdminUser | null {
   if (!tournament.user_id) {
-    return "Sin propietario";
+    return null;
   }
 
-  const owner =
+  return (
     users.find(
       (user) =>
         user.id === tournament.user_id,
-    );
+    ) ?? null
+  );
+}
 
-  if (owner?.email) {
-    return owner.email;
-  }
-
-  return tournament.user_id;
+function getUserDisplayName(
+  user: AdminUser,
+): string {
+  return (
+    user.username ||
+    user.email ||
+    "Usuario"
+  );
 }
 
 export default function AdminPage() {
@@ -558,23 +564,39 @@ export default function AdminPage() {
                 (user) => (
                   <article
                     key={user.id}
-                    className="grid gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] lg:items-center"
+                    className="grid gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] lg:items-center"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-4">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-red-500/20 bg-red-600/10 text-sm font-black uppercase text-red-300">
-                          {(
-                            user.email.charAt(
-                              0,
-                            ) || "U"
-                          ).toUpperCase()}
+                          {getUserDisplayName(
+                            user,
+                          )
+                            .charAt(0)
+                            .toUpperCase()}
                         </div>
 
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-black text-white sm:text-base">
-                            {user.email ||
-                              "Sin correo"}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="truncate text-sm font-black text-white sm:text-base">
+                              {getUserDisplayName(
+                                user,
+                              )}
+                            </p>
+
+                            {user.username && (
+                              <span className="rounded-full border border-red-500/20 bg-red-500/[0.06] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-red-300">
+                                Username
+                              </span>
+                            )}
+                          </div>
+
+                          {user.username &&
+                            user.email && (
+                              <p className="mt-1 truncate text-xs font-semibold text-neutral-500">
+                                {user.email}
+                              </p>
+                            )}
 
                           <p className="mt-1 truncate font-mono text-[11px] text-neutral-700">
                             {user.id}
@@ -681,130 +703,155 @@ export default function AdminPage() {
           ) : (
             <div className="divide-y divide-white/[0.07]">
               {tournaments.map(
-                (tournament) => (
-                  <article
-                    key={tournament.id}
-                    className="px-5 py-6 sm:px-6"
-                  >
-                    <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="truncate text-lg font-black text-white">
-                            {tournament.name}
-                          </h3>
+                (tournament) => {
+                  const owner =
+                    getTournamentOwner(
+                      tournament,
+                      users,
+                    );
 
-                          <span
-                            className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${getTournamentStatusClasses(
-                              tournament.status,
-                            )}`}
+                  return (
+                    <article
+                      key={tournament.id}
+                      className="px-5 py-6 sm:px-6"
+                    >
+                      <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h3 className="truncate text-lg font-black text-white">
+                              {tournament.name}
+                            </h3>
+
+                            <span
+                              className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${getTournamentStatusClasses(
+                                tournament.status,
+                              )}`}
+                            >
+                              {tournament.status ||
+                                "Sin estado"}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 truncate font-mono text-[11px] text-neutral-700">
+                            {tournament.id}
+                          </p>
+
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Juego
+                              </p>
+
+                              <p className="mt-1 text-sm font-bold text-neutral-300">
+                                {tournament.game ||
+                                  "No definido"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Formato
+                              </p>
+
+                              <p className="mt-1 text-sm font-bold text-neutral-300">
+                                {tournament.format ||
+                                  "No definido"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Modalidad
+                              </p>
+
+                              <p className="mt-1 text-sm font-bold text-neutral-300">
+                                {getTournamentModeLabel(
+                                  tournament.mode,
+                                )}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Participantes
+                              </p>
+
+                              <p className="mt-1 text-sm font-bold text-neutral-300">
+                                {tournament.teams ??
+                                  "—"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-4 border-t border-white/[0.06] pt-5 sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Propietario
+                              </p>
+
+                              {owner ? (
+                                <div className="mt-1">
+                                  <p className="truncate text-sm font-black text-white">
+                                    {getUserDisplayName(
+                                      owner,
+                                    )}
+                                  </p>
+
+                                  {owner.username &&
+                                    owner.email && (
+                                      <p className="mt-1 truncate text-xs font-semibold text-neutral-500">
+                                        {
+                                          owner.email
+                                        }
+                                      </p>
+                                    )}
+                                </div>
+                              ) : (
+                                <p className="mt-1 truncate font-mono text-xs text-neutral-500">
+                                  {tournament.user_id ||
+                                    "Sin propietario"}
+                                </p>
+                              )}
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Fecha del torneo
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-neutral-400">
+                                {formatTournamentDate(
+                                  tournament.date,
+                                )}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
+                                Creado
+                              </p>
+
+                              <p className="mt-1 text-sm font-semibold text-neutral-400">
+                                {formatDate(
+                                  tournament.created_at,
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0">
+                          <Link
+                            href={`/tournaments/${tournament.id}/bracket`}
+                            className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/20 bg-red-500/[0.07] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-red-300 transition hover:border-red-500/40 hover:bg-red-500/15 sm:w-auto"
                           >
-                            {tournament.status ||
-                              "Sin estado"}
-                          </span>
-                        </div>
-
-                        <p className="mt-2 truncate font-mono text-[11px] text-neutral-700">
-                          {tournament.id}
-                        </p>
-
-                        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Juego
-                            </p>
-
-                            <p className="mt-1 text-sm font-bold text-neutral-300">
-                              {tournament.game ||
-                                "No definido"}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Formato
-                            </p>
-
-                            <p className="mt-1 text-sm font-bold text-neutral-300">
-                              {tournament.format ||
-                                "No definido"}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Modalidad
-                            </p>
-
-                            <p className="mt-1 text-sm font-bold text-neutral-300">
-                              {getTournamentModeLabel(
-                                tournament.mode,
-                              )}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Participantes
-                            </p>
-
-                            <p className="mt-1 text-sm font-bold text-neutral-300">
-                              {tournament.teams ??
-                                "—"}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mt-5 grid gap-4 border-t border-white/[0.06] pt-5 sm:grid-cols-2 lg:grid-cols-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Propietario
-                            </p>
-
-                            <p className="mt-1 truncate text-sm font-semibold text-neutral-400">
-                              {getTournamentOwner(
-                                tournament,
-                                users,
-                              )}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Fecha del torneo
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-neutral-400">
-                              {formatTournamentDate(
-                                tournament.date,
-                              )}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                              Creado
-                            </p>
-
-                            <p className="mt-1 text-sm font-semibold text-neutral-400">
-                              {formatDate(
-                                tournament.created_at,
-                              )}
-                            </p>
-                          </div>
+                            Ver fixture →
+                          </Link>
                         </div>
                       </div>
-
-                      <div className="shrink-0">
-                        <Link
-                          href={`/tournaments/${tournament.id}/bracket`}
-                          className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/20 bg-red-500/[0.07] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-red-300 transition hover:border-red-500/40 hover:bg-red-500/15 sm:w-auto"
-                        >
-                          Ver fixture →
-                        </Link>
-                      </div>
-                    </div>
-                  </article>
-                ),
+                    </article>
+                  );
+                },
               )}
             </div>
           )}
