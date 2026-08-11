@@ -1,9 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
-import { supabase } from "@/lib/supabase";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  supabase,
+} from "@/lib/supabase";
 
 type AdminStatus =
   | "checking"
@@ -15,7 +21,8 @@ type AdminUser = {
   username: string | null;
   email: string;
   created_at: string;
-  last_sign_in_at: string | null;
+  last_sign_in_at:
+    string | null;
 };
 
 type AdminTournament = {
@@ -23,7 +30,10 @@ type AdminTournament = {
   name: string;
   game: string;
   format: string | null;
-  mode: "team" | "individual" | null;
+  mode:
+    | "team"
+    | "individual"
+    | null;
   teams: number | null;
   status: string | null;
   date: string | null;
@@ -38,9 +48,14 @@ function formatDate(
     return "Nunca";
   }
 
-  const date = new Date(value);
+  const date =
+    new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     return "No disponible";
   }
 
@@ -69,9 +84,15 @@ function formatTournamentDate(
       : `${value}T12:00:00`;
 
   const date =
-    new Date(normalizedValue);
+    new Date(
+      normalizedValue,
+    );
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     return "Fecha por definir";
   }
 
@@ -90,7 +111,10 @@ function normalizeText(
 ): string {
   return value
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(
+      /[\u0300-\u036f]/g,
+      "",
+    )
     .toLowerCase();
 }
 
@@ -98,7 +122,9 @@ function getTournamentStatusClasses(
   status: string | null,
 ): string {
   const normalizedStatus =
-    normalizeText(status ?? "");
+    normalizeText(
+      status ?? "",
+    );
 
   if (
     normalizedStatus.includes(
@@ -109,7 +135,9 @@ function getTournamentStatusClasses(
   }
 
   if (
-    normalizedStatus.includes("curso")
+    normalizedStatus.includes(
+      "curso",
+    )
   ) {
     return "border-amber-500/20 bg-amber-500/10 text-amber-400";
   }
@@ -123,7 +151,9 @@ function getTournamentStatusClasses(
   }
 
   if (
-    normalizedStatus.includes("proxim")
+    normalizedStatus.includes(
+      "proxim",
+    )
   ) {
     return "border-violet-500/20 bg-violet-500/10 text-violet-400";
   }
@@ -140,9 +170,12 @@ function getTournamentStatusClasses(
 }
 
 function getTournamentModeLabel(
-  mode: AdminTournament["mode"],
+  mode:
+    AdminTournament["mode"],
 ): string {
-  if (mode === "individual") {
+  if (
+    mode === "individual"
+  ) {
     return "Individual";
   }
 
@@ -154,17 +187,21 @@ function getTournamentModeLabel(
 }
 
 function getTournamentOwner(
-  tournament: AdminTournament,
+  tournament:
+    AdminTournament,
   users: AdminUser[],
 ): AdminUser | null {
-  if (!tournament.user_id) {
+  if (
+    !tournament.user_id
+  ) {
     return null;
   }
 
   return (
     users.find(
       (user) =>
-        user.id === tournament.user_id,
+        user.id ===
+        tournament.user_id,
     ) ?? null
   );
 }
@@ -179,79 +216,194 @@ function getUserDisplayName(
   );
 }
 
-export default function AdminPage() {
-  const [status, setStatus] =
-    useState<AdminStatus>("checking");
+async function getAuthorizationHeader() {
+  const {
+    data: { session },
+    error,
+  } =
+    await supabase.auth
+      .getSession();
 
-  const [users, setUsers] =
-    useState<AdminUser[]>([]);
+  if (
+    error ||
+    !session?.access_token
+  ) {
+    throw new Error(
+      "Tu sesión administrativa ya no es válida. Vuelve a iniciar sesión.",
+    );
+  }
+
+  return {
+    Authorization:
+      `Bearer ${session.access_token}`,
+  };
+}
+
+async function readApiMessage(
+  response: Response,
+  fallback: string,
+) {
+  try {
+    const data =
+      (await response.json()) as {
+        message?: string;
+      };
+
+    if (
+      typeof data.message ===
+        "string" &&
+      data.message.trim()
+    ) {
+      return data.message;
+    }
+  } catch {
+    // Se utiliza fallback.
+  }
+
+  return fallback;
+}
+
+export default function AdminPage() {
+  const [
+    status,
+    setStatus,
+  ] =
+    useState<AdminStatus>(
+      "checking",
+    );
+
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
+  const [
+    users,
+    setUsers,
+  ] =
+    useState<AdminUser[]>(
+      [],
+    );
 
   const [
     tournaments,
     setTournaments,
-  ] = useState<AdminTournament[]>([]);
+  ] =
+    useState<
+      AdminTournament[]
+    >([]);
 
   const [
     loadingUsers,
     setLoadingUsers,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     loadingTournaments,
     setLoadingTournaments,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     usersError,
     setUsersError,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     tournamentsError,
     setTournamentsError,
-  ] = useState("");
+  ] =
+    useState("");
+
+  const [
+    actionMessage,
+    setActionMessage,
+  ] =
+    useState("");
+
+  const [
+    actionError,
+    setActionError,
+  ] =
+    useState("");
+
+  const [
+    deletingUserId,
+    setDeletingUserId,
+  ] =
+    useState<
+      string | null
+    >(null);
+
+  const [
+    deletingTournamentId,
+    setDeletingTournamentId,
+  ] =
+    useState<
+      string | null
+    >(null);
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled =
+      false;
 
     async function loadAdminPanel() {
       try {
         const {
-          data: { session },
-          error: sessionError,
+          data: {
+            session,
+          },
+          error:
+            sessionError,
         } =
-          await supabase.auth.getSession();
+          await supabase.auth
+            .getSession();
 
         if (
           sessionError ||
-          !session?.access_token
+          !session?.access_token ||
+          !session.user?.id
         ) {
           if (!cancelled) {
-            setStatus("denied");
+            setStatus(
+              "denied",
+            );
           }
 
           return;
         }
 
-        const authorizationHeader = {
-          Authorization:
-            `Bearer ${session.access_token}`,
-        };
+        const authorizationHeader =
+          {
+            Authorization:
+              `Bearer ${session.access_token}`,
+          };
 
         const checkResponse =
           await fetch(
             "/api/admin/check",
             {
-              method: "GET",
+              method:
+                "GET",
               headers:
                 authorizationHeader,
-              cache: "no-store",
+              cache:
+                "no-store",
             },
           );
 
-        if (!checkResponse.ok) {
+        if (
+          !checkResponse.ok
+        ) {
           if (!cancelled) {
-            setStatus("denied");
+            setStatus(
+              "denied",
+            );
           }
 
           return;
@@ -259,12 +411,17 @@ export default function AdminPage() {
 
         const checkData =
           (await checkResponse.json()) as {
-            authorized?: boolean;
+            authorized?:
+              boolean;
           };
 
-        if (!checkData.authorized) {
+        if (
+          !checkData.authorized
+        ) {
           if (!cancelled) {
-            setStatus("denied");
+            setStatus(
+              "denied",
+            );
           }
 
           return;
@@ -274,51 +431,73 @@ export default function AdminPage() {
           return;
         }
 
-        setStatus("authorized");
+        setCurrentUserId(
+          session.user.id,
+        );
 
-        setLoadingUsers(true);
-        setLoadingTournaments(true);
+        setStatus(
+          "authorized",
+        );
+
+        setLoadingUsers(
+          true,
+        );
+
+        setLoadingTournaments(
+          true,
+        );
 
         setUsersError("");
-        setTournamentsError("");
+        setTournamentsError(
+          "",
+        );
 
         const [
           usersResponse,
           tournamentsResponse,
-        ] = await Promise.all([
-          fetch(
-            "/api/admin/users",
-            {
-              method: "GET",
-              headers:
-                authorizationHeader,
-              cache: "no-store",
-            },
-          ),
+        ] =
+          await Promise.all([
+            fetch(
+              "/api/admin/users",
+              {
+                method:
+                  "GET",
+                headers:
+                  authorizationHeader,
+                cache:
+                  "no-store",
+              },
+            ),
 
-          fetch(
-            "/api/admin/tournaments",
-            {
-              method: "GET",
-              headers:
-                authorizationHeader,
-              cache: "no-store",
-            },
-          ),
-        ]);
+            fetch(
+              "/api/admin/tournaments",
+              {
+                method:
+                  "GET",
+                headers:
+                  authorizationHeader,
+                cache:
+                  "no-store",
+              },
+            ),
+          ]);
 
         if (cancelled) {
           return;
         }
 
-        if (usersResponse.ok) {
+        if (
+          usersResponse.ok
+        ) {
           const usersData =
             (await usersResponse.json()) as {
-              users?: AdminUser[];
+              users?:
+                AdminUser[];
             };
 
           setUsers(
-            usersData.users ?? [],
+            usersData.users ??
+              [],
           );
         } else {
           setUsers([]);
@@ -333,7 +512,8 @@ export default function AdminPage() {
         ) {
           const tournamentsData =
             (await tournamentsResponse.json()) as {
-              tournaments?: AdminTournament[];
+              tournaments?:
+                AdminTournament[];
             };
 
           setTournaments(
@@ -341,7 +521,9 @@ export default function AdminPage() {
               [],
           );
         } else {
-          setTournaments([]);
+          setTournaments(
+            [],
+          );
 
           setTournamentsError(
             "No se pudieron cargar los torneos.",
@@ -355,7 +537,9 @@ export default function AdminPage() {
 
         if (!cancelled) {
           setUsers([]);
-          setTournaments([]);
+          setTournaments(
+            [],
+          );
 
           setUsersError(
             "No se pudo cargar el panel administrativo.",
@@ -367,8 +551,13 @@ export default function AdminPage() {
         }
       } finally {
         if (!cancelled) {
-          setLoadingUsers(false);
-          setLoadingTournaments(false);
+          setLoadingUsers(
+            false,
+          );
+
+          setLoadingTournaments(
+            false,
+          );
         }
       }
     }
@@ -380,7 +569,268 @@ export default function AdminPage() {
     };
   }, []);
 
-  if (status === "checking") {
+  async function handleDeleteTournament(
+    tournament:
+      AdminTournament,
+  ) {
+    if (
+      deletingTournamentId ||
+      deletingUserId
+    ) {
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `¿Seguro que deseas ELIMINAR COMPLETAMENTE el torneo "${tournament.name}"?\n\nSe eliminarán también su fixture, participantes y permisos.\n\nEsta acción no se puede deshacer.`,
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const confirmation =
+      window.prompt(
+        `Para confirmar la eliminación de "${tournament.name}", escribe exactamente:\n\nELIMINAR`,
+      );
+
+    if (
+      confirmation
+        ?.trim()
+        .toUpperCase() !==
+      "ELIMINAR"
+    ) {
+      return;
+    }
+
+    setDeletingTournamentId(
+      tournament.id,
+    );
+
+    setActionMessage("");
+    setActionError("");
+
+    try {
+      const headers =
+        await getAuthorizationHeader();
+
+      const response =
+        await fetch(
+          "/api/admin/delete-tournament",
+          {
+            method:
+              "DELETE",
+
+            headers: {
+              ...headers,
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                tournamentId:
+                  tournament.id,
+              }),
+          },
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiMessage(
+            response,
+            "No se pudo eliminar el torneo.",
+          ),
+        );
+      }
+
+      const result =
+        (await response.json()) as {
+          deleted?:
+            boolean;
+          storageWarning?:
+            string | null;
+        };
+
+      if (
+        result.deleted !==
+        true
+      ) {
+        throw new Error(
+          "El servidor no confirmó la eliminación.",
+        );
+      }
+
+      setTournaments(
+        (current) =>
+          current.filter(
+            (item) =>
+              item.id !==
+              tournament.id,
+          ),
+      );
+
+      setActionMessage(
+        result.storageWarning
+          ? `El torneo "${tournament.name}" fue eliminado. ${result.storageWarning}`
+          : `El torneo "${tournament.name}" fue eliminado completamente.`,
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar el torneo.",
+      );
+    } finally {
+      setDeletingTournamentId(
+        null,
+      );
+    }
+  }
+
+  async function handleDeleteUser(
+    user: AdminUser,
+  ) {
+    if (
+      deletingUserId ||
+      deletingTournamentId
+    ) {
+      return;
+    }
+
+    if (
+      user.id ===
+      currentUserId
+    ) {
+      setActionError(
+        "Tu cuenta Super Admin está protegida y no puede eliminarse.",
+      );
+
+      return;
+    }
+
+    const displayName =
+      getUserDisplayName(
+        user,
+      );
+
+    const confirmed =
+      window.confirm(
+        `¿Seguro que deseas ELIMINAR COMPLETAMENTE la cuenta "${displayName}"?\n\nTambién desaparecerán todos sus torneos, fixtures, participantes, permisos y archivos propios.\n\nEsta acción no se puede deshacer.`,
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const confirmation =
+      window.prompt(
+        `Esta operación eliminará permanentemente la cuenta "${displayName}".\n\nEscribe exactamente:\n\nELIMINAR`,
+      );
+
+    if (
+      confirmation
+        ?.trim()
+        .toUpperCase() !==
+      "ELIMINAR"
+    ) {
+      return;
+    }
+
+    setDeletingUserId(
+      user.id,
+    );
+
+    setActionMessage("");
+    setActionError("");
+
+    try {
+      const headers =
+        await getAuthorizationHeader();
+
+      const response =
+        await fetch(
+          "/api/admin/delete-user",
+          {
+            method:
+              "DELETE",
+
+            headers: {
+              ...headers,
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                userId:
+                  user.id,
+              }),
+          },
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiMessage(
+            response,
+            "No se pudo eliminar la cuenta.",
+          ),
+        );
+      }
+
+      const result =
+        (await response.json()) as {
+          deleted?:
+            boolean;
+        };
+
+      if (
+        result.deleted !==
+        true
+      ) {
+        throw new Error(
+          "El servidor no confirmó la eliminación de la cuenta.",
+        );
+      }
+
+      setUsers(
+        (current) =>
+          current.filter(
+            (item) =>
+              item.id !==
+              user.id,
+          ),
+      );
+
+      setTournaments(
+        (current) =>
+          current.filter(
+            (tournament) =>
+              tournament.user_id !==
+              user.id,
+          ),
+      );
+
+      setActionMessage(
+        `La cuenta "${displayName}" fue eliminada completamente.`,
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar la cuenta.",
+      );
+    } finally {
+      setDeletingUserId(
+        null,
+      );
+    }
+  }
+
+  if (
+    status ===
+    "checking"
+  ) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#070707] px-6 text-white">
         <div className="text-center">
@@ -394,7 +844,9 @@ export default function AdminPage() {
     );
   }
 
-  if (status === "denied") {
+  if (
+    status === "denied"
+  ) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#070707] px-6 text-white">
         <section className="w-full max-w-lg rounded-3xl border border-red-500/20 bg-[#111113] p-8 text-center shadow-2xl">
@@ -407,8 +859,11 @@ export default function AdminPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-neutral-500">
-            Esta sección está reservada exclusivamente
-            para el propietario de Esports Bracket Live.
+            Esta sección está
+            reservada
+            exclusivamente para
+            el propietario de
+            Esports Bracket Live.
           </p>
 
           <Link
@@ -431,7 +886,8 @@ export default function AdminPage() {
           <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="inline-flex rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-emerald-300">
-                ✓ Acceso verificado
+                ✓ Acceso
+                verificado
               </div>
 
               <h1 className="mt-5 text-3xl font-black sm:text-4xl">
@@ -439,8 +895,10 @@ export default function AdminPage() {
               </h1>
 
               <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-500">
-                Centro privado de administración de
-                Esports Bracket Live.
+                Centro privado de
+                administración de
+                Esports Bracket
+                Live.
               </p>
             </div>
 
@@ -448,15 +906,29 @@ export default function AdminPage() {
               href="/dashboard"
               className="w-fit rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-bold text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
             >
-              ← Volver al Dashboard
+              ← Volver al
+              Dashboard
             </Link>
           </div>
         </section>
 
+        {actionMessage && (
+          <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.07] px-5 py-4 text-sm font-semibold text-emerald-300">
+            {actionMessage}
+          </div>
+        )}
+
+        {actionError && (
+          <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/[0.07] px-5 py-4 text-sm font-semibold text-red-300">
+            {actionError}
+          </div>
+        )}
+
         <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <article className="rounded-2xl border border-white/10 bg-[#101012] p-6">
             <p className="text-xs font-black uppercase tracking-[0.18em] text-neutral-600">
-              Usuarios registrados
+              Usuarios
+              registrados
             </p>
 
             <p className="mt-3 text-4xl font-black text-white">
@@ -466,7 +938,8 @@ export default function AdminPage() {
             </p>
 
             <p className="mt-2 text-xs text-neutral-600">
-              Cuentas registradas
+              Cuentas
+              registradas
             </p>
           </article>
 
@@ -482,7 +955,8 @@ export default function AdminPage() {
             </p>
 
             <p className="mt-2 text-xs text-neutral-600">
-              Torneos de toda la plataforma
+              Torneos de toda la
+              plataforma
             </p>
           </article>
 
@@ -496,21 +970,24 @@ export default function AdminPage() {
             </p>
 
             <p className="mt-2 text-xs text-neutral-600">
-              Acceso exclusivo del propietario
+              Acceso exclusivo
+              del propietario
             </p>
           </article>
 
-          <article className="rounded-2xl border border-white/10 bg-[#101012] p-6">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-neutral-600">
+          <article className="rounded-2xl border border-red-500/20 bg-red-500/[0.04] p-6">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-red-400/70">
               Modo actual
             </p>
 
-            <p className="mt-3 text-lg font-black text-white">
-              Solo lectura
+            <p className="mt-3 text-lg font-black text-red-300">
+              Control total
             </p>
 
-            <p className="mt-2 text-xs text-neutral-600">
-              Ninguna acción destructiva habilitada
+            <p className="mt-2 text-xs text-red-300/40">
+              Acciones
+              administrativas
+              habilitadas
             </p>
           </article>
         </section>
@@ -522,11 +999,14 @@ export default function AdminPage() {
             </p>
 
             <h2 className="mt-2 text-2xl font-black text-white">
-              Usuarios registrados
+              Usuarios
+              registrados
             </h2>
 
             <p className="mt-2 text-sm text-neutral-500">
-              Cuentas existentes en Esports Bracket Live.
+              Cuentas existentes
+              en Esports Bracket
+              Live.
             </p>
           </header>
 
@@ -536,7 +1016,8 @@ export default function AdminPage() {
                 <div className="mx-auto h-11 w-11 animate-spin rounded-full border-4 border-white/10 border-t-red-500" />
 
                 <p className="mt-4 text-sm font-bold text-neutral-500">
-                  Cargando usuarios...
+                  Cargando
+                  usuarios...
                 </p>
               </div>
             </div>
@@ -546,7 +1027,8 @@ export default function AdminPage() {
                 {usersError}
               </div>
             </div>
-          ) : users.length === 0 ? (
+          ) : users.length ===
+            0 ? (
             <div className="flex min-h-[250px] items-center justify-center px-6 text-center">
               <div>
                 <div className="text-3xl">
@@ -561,75 +1043,126 @@ export default function AdminPage() {
           ) : (
             <div className="divide-y divide-white/[0.07]">
               {users.map(
-                (user) => (
-                  <article
-                    key={user.id}
-                    className="grid gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] lg:items-center"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-red-500/20 bg-red-600/10 text-sm font-black uppercase text-red-300">
-                          {getUserDisplayName(
-                            user,
-                          )
-                            .charAt(0)
-                            .toUpperCase()}
-                        </div>
+                (user) => {
+                  const protectedUser =
+                    user.id ===
+                    currentUserId;
 
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="truncate text-sm font-black text-white sm:text-base">
-                              {getUserDisplayName(
-                                user,
-                              )}
-                            </p>
+                  const deleting =
+                    deletingUserId ===
+                    user.id;
 
-                            {user.username && (
-                              <span className="rounded-full border border-red-500/20 bg-red-500/[0.06] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-red-300">
-                                Username
-                              </span>
-                            )}
+                  return (
+                    <article
+                      key={
+                        user.id
+                      }
+                      className="grid gap-5 px-5 py-5 sm:px-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_auto] xl:items-center"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-red-500/20 bg-red-600/10 text-sm font-black uppercase text-red-300">
+                            {getUserDisplayName(
+                              user,
+                            )
+                              .charAt(
+                                0,
+                              )
+                              .toUpperCase()}
                           </div>
 
-                          {user.username &&
-                            user.email && (
-                              <p className="mt-1 truncate text-xs font-semibold text-neutral-500">
-                                {user.email}
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-black text-white sm:text-base">
+                                {getUserDisplayName(
+                                  user,
+                                )}
                               </p>
-                            )}
 
-                          <p className="mt-1 truncate font-mono text-[11px] text-neutral-700">
-                            {user.id}
-                          </p>
+                              {protectedUser && (
+                                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-emerald-300">
+                                  Super
+                                  Admin
+                                </span>
+                              )}
+                            </div>
+
+                            {user.username &&
+                              user.email && (
+                                <p className="mt-1 truncate text-xs font-semibold text-neutral-500">
+                                  {
+                                    user.email
+                                  }
+                                </p>
+                              )}
+
+                            <p className="mt-1 truncate font-mono text-[11px] text-neutral-700">
+                              {user.id}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-neutral-700">
-                        Registrado
-                      </p>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-neutral-700">
+                          Registrado
+                        </p>
 
-                      <p className="mt-1 text-sm font-semibold text-neutral-400">
-                        {formatDate(
-                          user.created_at,
+                        <p className="mt-1 text-sm font-semibold text-neutral-400">
+                          {formatDate(
+                            user.created_at,
+                          )}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-neutral-700">
+                          Último
+                          acceso
+                        </p>
+
+                        <p className="mt-1 text-sm font-semibold text-neutral-400">
+                          {formatDate(
+                            user.last_sign_in_at,
+                          )}
+                        </p>
+                      </div>
+
+                      <div>
+                        {protectedUser ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="inline-flex min-w-[170px] items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-emerald-400"
+                          >
+                            🔒 Cuenta
+                            protegida
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                deletingUserId ||
+                                  deletingTournamentId,
+                              )
+                            }
+                            onClick={() => {
+                              void handleDeleteUser(
+                                user,
+                              );
+                            }}
+                            className="inline-flex min-w-[170px] items-center justify-center rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-red-300 transition hover:border-red-500/50 hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deleting
+                              ? "ELIMINANDO..."
+                              : "ELIMINAR CUENTA"}
+                          </button>
                         )}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-neutral-700">
-                        Último acceso
-                      </p>
-
-                      <p className="mt-1 text-sm font-semibold text-neutral-400">
-                        {formatDate(
-                          user.last_sign_in_at,
-                        )}
-                      </p>
-                    </div>
-                  </article>
-                ),
+                      </div>
+                    </article>
+                  );
+                },
               )}
             </div>
           )}
@@ -644,19 +1177,25 @@ export default function AdminPage() {
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-2xl font-black text-white">
-                  Torneos creados
+                  Torneos
+                  creados
                 </h2>
 
                 <p className="mt-2 text-sm text-neutral-500">
-                  Todos los torneos registrados
-                  en Esports Bracket Live.
+                  Todos los
+                  torneos
+                  registrados en
+                  Esports Bracket
+                  Live.
                 </p>
               </div>
 
               {!loadingTournaments &&
                 !tournamentsError && (
                   <div className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-black text-neutral-400">
-                    {tournaments.length}{" "}
+                    {
+                      tournaments.length
+                    }{" "}
                     {tournaments.length ===
                     1
                       ? "torneo"
@@ -672,14 +1211,17 @@ export default function AdminPage() {
                 <div className="mx-auto h-11 w-11 animate-spin rounded-full border-4 border-white/10 border-t-red-500" />
 
                 <p className="mt-4 text-sm font-bold text-neutral-500">
-                  Cargando torneos...
+                  Cargando
+                  torneos...
                 </p>
               </div>
             </div>
           ) : tournamentsError ? (
             <div className="px-6 py-10">
               <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-5 py-4 text-sm font-semibold text-red-300">
-                {tournamentsError}
+                {
+                  tournamentsError
+                }
               </div>
             </div>
           ) : tournaments.length ===
@@ -693,11 +1235,6 @@ export default function AdminPage() {
                 <h3 className="mt-4 text-lg font-black">
                   No hay torneos
                 </h3>
-
-                <p className="mt-2 text-sm text-neutral-600">
-                  Todavía no existen torneos
-                  registrados.
-                </p>
               </div>
             </div>
           ) : (
@@ -710,16 +1247,24 @@ export default function AdminPage() {
                       users,
                     );
 
+                  const deleting =
+                    deletingTournamentId ===
+                    tournament.id;
+
                   return (
                     <article
-                      key={tournament.id}
+                      key={
+                        tournament.id
+                      }
                       className="px-5 py-6 sm:px-6"
                     >
                       <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-3">
                             <h3 className="truncate text-lg font-black text-white">
-                              {tournament.name}
+                              {
+                                tournament.name
+                              }
                             </h3>
 
                             <span
@@ -733,7 +1278,9 @@ export default function AdminPage() {
                           </div>
 
                           <p className="mt-2 truncate font-mono text-[11px] text-neutral-700">
-                            {tournament.id}
+                            {
+                              tournament.id
+                            }
                           </p>
 
                           <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -816,7 +1363,8 @@ export default function AdminPage() {
 
                             <div>
                               <p className="text-[10px] font-black uppercase tracking-[0.14em] text-neutral-700">
-                                Fecha del torneo
+                                Fecha del
+                                torneo
                               </p>
 
                               <p className="mt-1 text-sm font-semibold text-neutral-400">
@@ -840,13 +1388,34 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        <div className="shrink-0">
+                        <div className="flex shrink-0 flex-col gap-3 sm:flex-row xl:flex-col">
                           <Link
                             href={`/tournaments/${tournament.id}/bracket`}
-                            className="inline-flex w-full items-center justify-center rounded-xl border border-red-500/20 bg-red-500/[0.07] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-red-300 transition hover:border-red-500/40 hover:bg-red-500/15 sm:w-auto"
+                            className="inline-flex min-w-[170px] items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-neutral-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
                           >
-                            Ver fixture →
+                            Ver fixture
+                            →
                           </Link>
+
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                deletingTournamentId ||
+                                  deletingUserId,
+                              )
+                            }
+                            onClick={() => {
+                              void handleDeleteTournament(
+                                tournament,
+                              );
+                            }}
+                            className="inline-flex min-w-[170px] items-center justify-center rounded-xl border border-red-500/25 bg-red-500/[0.07] px-5 py-3 text-xs font-black uppercase tracking-[0.1em] text-red-300 transition hover:border-red-500/50 hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deleting
+                              ? "ELIMINANDO..."
+                              : "ELIMINAR TORNEO"}
+                          </button>
                         </div>
                       </div>
                     </article>
@@ -857,12 +1426,27 @@ export default function AdminPage() {
           )}
         </section>
 
-        <div className="mt-6 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.04] px-5 py-4">
-          <p className="text-xs font-bold leading-6 text-emerald-300/80">
-            Panel en modo solo lectura.
-            No existen acciones para eliminar,
-            suspender o modificar usuarios o
-            torneos.
+        <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/[0.045] px-5 py-5">
+          <p className="text-sm font-black text-red-300">
+            ⚠ Control total
+            habilitado
+          </p>
+
+          <p className="mt-2 text-xs font-semibold leading-6 text-red-200/50">
+            Las eliminaciones
+            son permanentes.
+            Eliminar un torneo
+            también elimina su
+            fixture,
+            participantes y
+            permisos. Eliminar
+            una cuenta elimina
+            además todos los
+            torneos que le
+            pertenecen. Tu
+            propia cuenta Super
+            Admin está
+            protegida.
           </p>
         </div>
       </div>
