@@ -418,6 +418,15 @@ export default function LoginPage() {
                         : "Mostrar"}
                     </button>
                   </div>
+
+                  <div className="mt-3 flex justify-end">
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs font-black text-red-500 transition hover:text-red-400"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </Link>
+                  </div>
                 </div>
 
                 <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 transition hover:border-red-500/20 hover:bg-red-500/[0.04]">
