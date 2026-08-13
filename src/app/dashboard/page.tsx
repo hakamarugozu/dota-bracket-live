@@ -251,6 +251,7 @@ export default function DashboardPage() {
   const [nextMatch, setNextMatch] = useState<NextMatchSummary | null>(null);
   const [loadingTournaments, setLoadingTournaments] = useState(true);
   const [tournamentsError, setTournamentsError] = useState("");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -277,6 +278,45 @@ export default function DashboardPage() {
         }
 
         setUser(authenticatedUser);
+
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (!mounted) {
+          return;
+        }
+
+        if (!sessionError && session?.access_token) {
+          try {
+            const adminResponse = await fetch(
+              "/api/admin/check",
+              {
+                method: "GET",
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+                cache: "no-store",
+              },
+            );
+
+            if (mounted) {
+              setIsSuperAdmin(adminResponse.ok);
+            }
+          } catch (adminCheckError) {
+            console.error(
+              "No se pudo comprobar el acceso de Super Admin:",
+              adminCheckError,
+            );
+
+            if (mounted) {
+              setIsSuperAdmin(false);
+            }
+          }
+        } else {
+          setIsSuperAdmin(false);
+        }
 
         const {
           data: tournamentData,
@@ -556,14 +596,27 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <Link
-            href="/create"
-            className="group inline-flex w-full items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-sm font-bold text-white shadow-[0_14px_35px_rgba(220,38,38,0.2)] transition hover:-translate-y-0.5 hover:bg-red-500 xl:w-auto"
-          >
-            <span className="text-xl leading-none">＋</span>
-            Crear torneo
-            <span className="transition group-hover:translate-x-1">→</span>
-          </Link>
+          <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
+            <Link
+              href="/create"
+              className="group inline-flex w-full items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-sm font-bold text-white shadow-[0_14px_35px_rgba(220,38,38,0.2)] transition hover:-translate-y-0.5 hover:bg-red-500 sm:w-auto"
+            >
+              <span className="text-xl leading-none">＋</span>
+              Crear torneo
+              <span className="transition group-hover:translate-x-1">→</span>
+            </Link>
+
+            {isSuperAdmin && (
+              <Link
+                href="/admin"
+                className="group inline-flex w-full items-center justify-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-6 py-4 text-sm font-bold text-amber-300 transition hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-500/15 hover:text-amber-200 sm:w-auto"
+              >
+                <span className="text-lg leading-none">🛡</span>
+                Panel Admin
+                <span className="transition group-hover:translate-x-1">→</span>
+              </Link>
+            )}
+          </div>
         </div>
       </section>
 
